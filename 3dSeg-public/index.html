@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><title>PCD Professional Viewer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; background: #111; color: #fff; font-family: sans-serif; font-size: 13px; overflow: hidden; position: relative; }
+    #layout { position: relative; display: flex; height: 100%; }
+    #viewWrap { flex: 1; position: relative; background: #111; }
+    #render3d { position: absolute; inset: 0; }
+
+    #sidebarRight {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 320px;
+      padding: 15px;
+      background: #1a1a1a;
+      border-left: 1px solid #333;
+      overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      z-index: 2600;
+    }
+    #sidebarRight.open { transform: translateX(0); }
+
+    #sidebarRight h3 { color: #00aaff; border-bottom: 1px solid #333; font-size: 13px; margin-top: 0; }
+    #sidebarRight input, #sidebarRight select, #sidebarRight button { width: 100%; margin-bottom: 10px; padding: 5px; background: #222; color: #fff; border: 1px solid #444; font-size: 12px; }
+    .group { border: 1px solid #333; padding: 10px; margin-bottom: 10px; }
+    .inline-check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .row-2 { display: flex; gap: 8px; }
+    .row-2 > * { flex: 1; }
+    label { font-size: 12px; display: block; margin-bottom: 4px; }
+
+    #settingBtn { position: absolute; top: 10px; right: 10px; z-index: 3000; background: #444; color: #fff; border: 1px solid #666; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+
+    /* video view */
+    #videoView { position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #videoView video { max-width: none; max-height: none; transform-origin: center center; }
+    #videoView .resize-handle { position: absolute; width: 14px; height: 14px; right: 0; top: 0; background: #00aaff; cursor: nwse-resize; }
+  </style>
+</head>
+<body>
+  <button id="settingBtn">⚙</button>
+  <div id="layout">
+    <div id="viewWrap">
+      <div id="render3d"></div>
+    </div>
+    <div id="sidebarRight">
+      <h3>Data</h3>
+      <input type="file" id="pcdFile" accept=".pcd,.json" />
+      <input type="file" id="videoFile" accept="video/*" />
+
+      <h3>Shader Settings</h3>
+      <label>Point Size (1-2)</label>
+      <input type="range" id="size" min="1" max="10" step="0.1" value="1.5">
+
+      <div class="group">
+        <label>Color Mode</label>
+        <select id="colorMode">
+          <option value="default">Default</option>
+          <option value="bw">B&W</option>
+          <option value="height">Height Gradient</option>
+          <option value="distance">Dist Gradient</option>
+        </select>
+        <div id="gradOpts" style="display:none">
+          <div class="row-2">
+            <input type="number" id="min" value="0">
+            <input type="number" id="max" value="5">
+          </div>
+          <div class="row-2" style="margin-top:6px;">
+            <input type="color" id="c1" value="#0000ff">
+            <input type="color" id="c2" value="#ff0000">
+          </div>
+          <label style="margin-top:6px;">Repeat / Mode</label>
+          <div class="row-2">
+            <input type="number" id="rep" value="1" step="0.1">
+            <select id="mode"><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <label>Filters (Min/Max)</label>
+        <select id="fType">
+          <option value="none">None</option>
+          <option value="height">Height (Z)</option>
+          <option value="distance">Distance</option>
+        </select>
+        <div id="filterOpts" style="display:none">
+          <div class="row-2" style="margin-top:6px;">
+            <input type="number" id="fMin" value="0">
+            <input type="number" id="fMax" value="2">
+          </div>
+        </div>
+      </div>
+
+      <label class="inline-check"><input type="checkbox" id="oxy"> Project to OXY (2D)</label>
+      <button id="apply" style="background:#007bff">APPLY ALL</button>
+      <button id="export" style="background:#28a745">EXPORT POLYGONS</button>
+    </div>
+  </div>
+
+  <script type="importmap"> 
+  { 
+    "imports": { 
+      "three": "https://unpkg.com/three@0.161.0/build/three.module.js", 
+      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
+      "./js":"./js"
+    } 
+  } </script>
+  <script type="module">
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Import modules
+      const THREE = await import('three');
+      const { PCDLoader } = await import('three/addons/loaders/PCDLoader.js');
+      const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+      const { MapControls } = await import('three/addons/controls/MapControls.js');
+      const { updatePCDShader } = await import('./js/helper_shader_pcd.js');
+      const { PolygonManager } = await import('./js/helper_polygon.js');
+      const { VideoManager } = await import('./js/helper_video.js');
+
+      const CATEGORY_LIST = [
+        { id: 205340, name: 'undrivable', color: '#ff0000' },
+        { id: 205341, name: 'things',      color: '#ffff00' },
+        { id: 205342, name: 'construction',color: '#800080' },
+        { id: 205343, name: 'uneven',      color: '#ffffff' },
+      ];
+
+      const render3d = document.getElementById('render3d');
+      if (!render3d) { console.error('Element #render3d not found'); return; }
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setClearColor(0xa0a0a0a0, 1);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      render3d.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const persCam = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+      persCam.position.set(5,5,5);
+      const orthoCam = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 1000);
+      orthoCam.up.set(0,1,0);
+      orthoCam.position.set(0,0,50);
+
+      // Trục tọa độ tham chiếu
+      const axes = new THREE.AxesHelper(5);
+      axes.renderOrder = 1500;
+      axes.traverse(obj => {
+        if (obj.material) {
+          obj.material.depthTest = false;
+          obj.material.depthWrite = false;
+        }
+      });
+      scene.add(axes);
+
+      let camera = persCam, controls = new OrbitControls(camera, renderer.domElement), points = null;
+      const poly = new PolygonManager(scene, renderer);
+      poly.setCategories(CATEGORY_LIST);
+      const videoMgr = new VideoManager(document.body);
+
+      let activeRegion = 'render3d';
+      let isRendering = false;
+      let currentPcdName = null; // basename của file pcd hiện tại (nếu có)
+      let selectionArmed = false; // require E + click to select/edit
+
+      const basename = (p = '') => p.split(/[\\/]/).pop() || '';
+      const isPcdNameMatch = (jsonName, loadedName) => {
+        if (!jsonName || !loadedName) return false;
+        return basename(jsonName).toLowerCase() === basename(loadedName).toLowerCase();
+      };
+
+      function setActiveRegion(region) {
+          activeRegion = region;
+          if (region === 'render3d') startRender(); else stopRender();
+      }
+
+      function resizeRenderer() {
+          const { clientWidth, clientHeight } = render3d;
+          renderer.setSize(clientWidth, clientHeight);
+          if (camera.isPerspectiveCamera) camera.aspect = clientWidth / clientHeight;
+          if (camera.isOrthographicCamera) {
+              const aspect = clientWidth / clientHeight;
+              const viewSize = 20;
+              camera.left = -viewSize * aspect;
+              camera.right = viewSize * aspect;
+              camera.top = viewSize;
+              camera.bottom = -viewSize;
+          }
+          camera.updateProjectionMatrix();
+      }
+      window.addEventListener('resize', resizeRenderer);
+
+      function setupControls(is2D) {
+          const target = controls.target ? controls.target.clone() : new THREE.Vector3();
+          const lastZoom = camera.zoom;
+          controls.dispose();
+
+          if(is2D) {
+              camera = orthoCam; // Bắt buộc dùng OrthographicCamera cho PlaneOXY
+              orthoCam.position.copy(target).add(new THREE.Vector3(0,0,50));
+              orthoCam.lookAt(target);
+              orthoCam.zoom = lastZoom;
+              orthoCam.updateProjectionMatrix();
+
+              controls = new MapControls(camera, renderer.domElement);
+              controls.enableRotate = false;
+              controls.screenSpacePanning = true;
+              controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+              controls.target.copy(target);
+          } else {
+              camera = persCam;
+              const dir = persCam.position.clone().sub(target).normalize().multiplyScalar(10);
+              persCam.position.copy(target.clone().add(dir));
+              persCam.lookAt(target);
+              persCam.updateProjectionMatrix();
+
+              controls = new OrbitControls(camera, renderer.domElement);
+              controls.target.copy(target);
+          }
+          controls.update();
+          resizeRenderer();
+      }
+
+      document.getElementById('colorMode').onchange = e => {
+          document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
+      };
+      document.getElementById('fType').onchange = e => {
+          document.getElementById('filterOpts').style.display = (e.target.value === 'none') ? 'none' : 'block';
+      };
+
+      window.addEventListener('keydown', e => {
+          if (activeRegion !== 'render3d') return;
+          if (e.key.toLowerCase() === 'p') poly.start();
+          if (e.key.toLowerCase() === 'e') selectionArmed = true;
+          if (e.key === 'Escape') poly.finish();
+          if (e.key === 'Delete') poly.deleteSelected();
+          if (e.key === 'ArrowUp') { e.preventDefault(); poly.cycleCategory(1); }
+          if (e.key === 'ArrowDown') { e.preventDefault(); poly.cycleCategory(-1); }
+      });
+
+      render3d.addEventListener('mousedown', e => {
+          setActiveRegion('render3d');
+          if (activeRegion !== 'render3d') return;
+          if(e.button === 0) {
+              const hit = poly.handlePointerDown(e, camera, { allowSelect: selectionArmed || poly.isDrawing, allowDrag: !selectionArmed });
+              selectionArmed = false;
+              if (hit?.action === 'drag-start' || hit?.action === 'selected') return;
+              if(!poly.onDragStart || !poly.onDragStart(e, camera)) poly.addPoint(e, camera);
+          }
+      });
+      render3d.addEventListener('mousemove', e => { if (activeRegion === 'render3d') poly.onDrag(e, camera); });
+      render3d.addEventListener('mouseup', () => { if (activeRegion === 'render3d') poly.onDragEnd(); });
+
+      function apply() {
+          if(!points) return;
+          const is2D = document.getElementById('oxy').checked;
+          setupControls(is2D); // đảm bảo PlaneOXY luôn ở OrthographicCamera
+          poly.setFlatten(is2D);
+          const fType = document.getElementById('fType').value;
+          updatePCDShader(THREE, points, {
+              pointSize: parseFloat(document.getElementById('size').value),
+              colorMode: document.getElementById('colorMode').value,
+              hZMin: parseFloat(document.getElementById('min').value), hZMax: parseFloat(document.getElementById('max').value),
+              hStart: new THREE.Color(document.getElementById('c1').value), hEnd: new THREE.Color(document.getElementById('c2').value),
+              hRepeat: parseFloat(document.getElementById('rep').value), hMode: document.getElementById('mode').value,
+              dMin: parseFloat(document.getElementById('min').value), dMax: parseFloat(document.getElementById('max').value),
+              dStart: new THREE.Color(document.getElementById('c1').value), dEnd: new THREE.Color(document.getElementById('c2').value),
+              dRepeat: parseFloat(document.getElementById('rep').value), dMode: document.getElementById('mode').value,
+              filterType: fType, fMin: parseFloat(document.getElementById('fMin').value), fMax: parseFloat(document.getElementById('fMax').value),
+              projectOXY: is2D
+          });
+      }
+
+      function pickImageIdForJson(data) {
+          const images = Array.isArray(data.images) ? data.images : [];
+          const pcdImages = images.filter(img => typeof img.file_name === 'string' && img.file_name.toLowerCase().endsWith('.pcd'));
+          if (!pcdImages.length) return null;
+
+          if (currentPcdName) {
+              const match = pcdImages.find(img => isPcdNameMatch(img.file_name, currentPcdName));
+              if (match) return match.id;
+          }
+          return pcdImages[0].id; // fallback: lấy pcd đầu tiên trong json
+      }
+
+      function loadJsonPolygons(file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+              try {
+                  const data = JSON.parse(reader.result);
+                  if (Array.isArray(data.categories)) poly.setCategories(data.categories);
+                  const imageId = pickImageIdForJson(data);
+                  const anns = Array.isArray(data.annotations) ? data.annotations : [];
+                  const filtered = imageId == null
+                    ? anns.filter(a => a.shape === 'polygon' && a.type === '3D')
+                    : anns.filter(a => a.image_id === imageId && a.shape === 'polygon' && a.type === '3D');
+                  poly.loadFromAnnotations(filtered);
+              } catch (err) {
+                  console.error('Invalid JSON', err);
+              }
+          };
+          reader.readAsText(file);
+      }
+
+      document.getElementById('pcdFile').onchange = e => {
+          const file = e.target.files[0];
+          if(!file) return;
+          const ext = file.name.toLowerCase().split('.').pop();
+          if (ext === 'json') {
+              loadJsonPolygons(file);
+              return;
+          }
+          if (ext === 'pcd') {
+              currentPcdName = basename(file.name);
+              new PCDLoader().load(URL.createObjectURL(file), p => {
+                  if(points) scene.remove(points);
+                  points = p; scene.add(points); apply();
+              });
+          }
+      };
+
+      document.getElementById('videoFile').onchange = e => {
+          const file = e.target.files[0];
+          if (file) {
+              videoMgr.loadVideo(file, () => setActiveRegion('video'));
+          }
+      };
+
+      document.getElementById('apply').onclick = apply;
+
+      document.getElementById('export').onclick = () => {
+          const data = poly.getAnnotations();
+          data.categories = CATEGORY_LIST.map(c => ({ id: c.id, name: c.name }));
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'polygons.json';
+          a.click();
+          URL.revokeObjectURL(url);
+      };
+
+      const sidebar = document.getElementById('sidebarRight');
+      document.getElementById('settingBtn').onclick = () => {
+          sidebar.classList.toggle('open');
+          requestAnimationFrame(resizeRenderer);
+      };
+
+      render3d.addEventListener('click', () => setActiveRegion('render3d'));
+      videoMgr.onFocus(() => setActiveRegion('video'));
+
+      function animate() {
+          if (!isRendering) return;
+          requestAnimationFrame(animate);
+          controls.update();
+          renderer.render(scene, camera);
+      }
+      function startRender() {
+          if (isRendering) return;
+          isRendering = true;
+          animate();
+      }
+      function stopRender() { isRendering = false; }
+
+      resizeRenderer();
+      startRender();
+    });
+  </script>
+</body>
+</html>
