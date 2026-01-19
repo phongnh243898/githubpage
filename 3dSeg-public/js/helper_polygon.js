@@ -21,10 +21,10 @@ export class PolygonManager {
         this.flatten = false;
     }
 
-    // Lấy màu dựa trên Name thay vì ID
-    getCategoryColorByName(name) {
+    // Hàm bổ trợ để tìm màu dựa trên Name (Yêu cầu chính)
+    _getColorByName(name) {
         const found = DEFAULT_CATEGORY_LIST.find(c => c.name === name);
-        return found ? found.color : 0xff0000; // Mặc định đỏ nếu không thấy tên
+        return found ? found.color : 0xff0000;
     }
 
     setFlatten(flag) {
@@ -37,22 +37,24 @@ export class PolygonManager {
 
     setCategories(list = []) {
         if (Array.isArray(list) && list.length) {
-            // Cập nhật categoryList hiện tại, vẫn giữ mapping màu qua name
             this.categoryList = list.map(c => ({
                 id: c.id,
                 name: c.name,
-                color: this.getCategoryColorByName(c.name)
+                // Luôn lấy màu từ DEFAULT_LIST dựa trên name
+                color: this._getColorByName(c.name)
             }));
             this.polygons.forEach(p => this.updateHandleStyles(p));
         }
     }
 
-    // Trả về Name mặc định thay vì ID
-    get defaultCategoryName() { return this.categoryList[0]?.name ?? DEFAULT_CATEGORY_LIST[0].name; }
+    // Mặc định lấy theo Name
+    get defaultCategoryName() { 
+        return this.categoryList[0]?.name ?? DEFAULT_CATEGORY_LIST[0].name; 
+    }
 
     start() {
         this.isDrawing = true;
-        // Lưu trữ bằng categoryName để dễ quản lý màu sắc
+        // Chuyển sang lưu categoryName thay vì id để quản lý màu
         const poly = { 
             points: [], 
             handles: [], 
@@ -78,7 +80,7 @@ export class PolygonManager {
     createHandle(poly, pos) {
         const geo = new THREE.SphereGeometry(0.12, 16, 12);
         const mat = new THREE.MeshBasicMaterial({
-            color: this.getCategoryColorByName(poly.categoryName),
+            color: this._getColorByName(poly.categoryName), // Xác định màu qua name
             depthTest: false,
             depthWrite: false,
             transparent: true
@@ -92,7 +94,7 @@ export class PolygonManager {
     }
 
     updateHandleStyles(poly) {
-        const color = this.getCategoryColorByName(poly.categoryName);
+        const color = this._getColorByName(poly.categoryName);
         poly.handles.forEach((h, idx) => {
             if (h.material?.color) h.material.color.set(color);
             const p = poly.points[idx];
@@ -181,7 +183,7 @@ export class PolygonManager {
           : poly.points;
 
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        const color = this.getCategoryColorByName(poly.categoryName);
+        const color = this._getColorByName(poly.categoryName);
         const isSelected = this.selected === poly;
         const mat = new THREE.LineBasicMaterial({
             color,
@@ -247,38 +249,35 @@ export class PolygonManager {
         this.selected = null;
     }
 
-    /**
-     * IMPORT LOGIC
-     */
+    // --- LOGIC MỚI CHO IMPORT/EXPORT ---
+
     loadFromAnnotations(data) {
         const annotations = data.annotations || [];
-        const incomingCategories = data.categories || [];
+        const categories = data.categories || [];
         
-        // Cập nhật categoryList từ file JSON để map ID -> Name
-        this.setCategories(incomingCategories);
+        // Cập nhật danh sách category nội bộ để đồng bộ ID/Name từ file
+        this.setCategories(categories);
         
         this.clearAll();
         annotations.forEach((a) => {
             if (!a || a.shape !== 'polygon' || !Array.isArray(a.location)) return;
-            
-            // Tìm Name tương ứng với ID trong file JSON
-            const catInfo = incomingCategories.find(c => c.id === a.category_id);
-            const catName = catInfo ? catInfo.name : this.defaultCategoryName;
+
+            // Bước quan trọng: Tìm name từ id trong json để định nghĩa màu
+            const catObj = categories.find(c => c.id === a.category_id);
+            const nameFromId = catObj ? catObj.name : this.defaultCategoryName;
 
             const pts = a.location
                 .map(pt => new THREE.Vector3(pt.x, pt.y, pt.z ?? 0))
                 .filter(v => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z));
             
             if (pts.length < 3) return;
-
             const poly = {
                 points: [],
                 handles: [],
                 line: null,
                 closed: true,
-                categoryName: catName // Lưu bằng Name
+                categoryName: nameFromId // Lưu bằng Name
             };
-
             this.polygons.push(poly);
             pts.forEach(p => {
                 const clone = p.clone();
@@ -291,19 +290,16 @@ export class PolygonManager {
         this.updateHandleVisibility();
     }
 
-    /**
-     * EXPORT LOGIC
-     */
     getAnnotations() {
         const closedPolys = this.polygons.filter(p => p.closed && p.points.length >= 3);
         return {
             annotations: closedPolys.map((p, idx) => {
-                // Map Name ngược lại ID để xuất ra COCO
-                const catInfo = this.categoryList.find(c => c.name === p.categoryName);
+                // Tìm ID từ Name để xuất ra COCO
+                const catObj = this.categoryList.find(c => c.name === p.categoryName);
                 return {
                     id: idx + 1,
                     type: '3D',
-                    category_id: catInfo ? catInfo.id : 0,
+                    category_id: catObj ? catObj.id : 0,
                     shape: 'polygon',
                     location: p.points.map(pt => ({ x: pt.x, y: pt.y, z: pt.z ?? 0 }))
                 };
