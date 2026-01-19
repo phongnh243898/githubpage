@@ -1,100 +1,80 @@
 import * as THREE from 'three';
 
-/* ================= DEFAULT CATEGORIES ================= */
 const DEFAULT_CATEGORY_LIST = [
-    { id: 207733, name: 'undrivable',   color: 0xff0000 },
-    { id: 207734, name: 'things',       color: 0xffff00 },
-    { id: 207735, name: 'construction', color: 0x800080 },
-    { id: 207736, name: 'uneven',        color: 0xffffff }
+    { id: 207733, name: 'undrivable', color: 0xff0000 },
+    { id: 207734, name: 'things',      color: 0xffff00 },
+    { id: 207735, name: 'construction',color: 0x800080 },
+    { id: 207736, name: 'uneven',      color: 0xffffff }
 ];
 
 export class PolygonManager {
     constructor(scene, renderer) {
         this.scene = scene;
         this.renderer = renderer;
-
         this.polygons = [];
         this.current = null;
-        this.selected = null;
         this.isDrawing = false;
-        this.flatten = false;
-
-        this.categoryList = [...DEFAULT_CATEGORY_LIST];
-        this.categoryNameToId = {};
-
         this.raycaster = new THREE.Raycaster();
         this.raycaster.params.Line = { threshold: 0.15 };
-
-        this.buildCategoryNameToId();
+        this.selected = null;
+        this.categoryList = [...DEFAULT_CATEGORY_LIST];
+        this.flatten = false;
     }
 
-    /* ================= CATEGORY ================= */
-    buildCategoryNameToId() {
-        this.categoryNameToId = {};
-        this.categoryList.forEach(c => {
-            this.categoryNameToId[c.name] = c.id;
+    // Lấy màu dựa trên Name thay vì ID
+    getCategoryColorByName(name) {
+        const found = DEFAULT_CATEGORY_LIST.find(c => c.name === name);
+        return found ? found.color : 0xff0000; // Mặc định đỏ nếu không thấy tên
+    }
+
+    setFlatten(flag) {
+        this.flatten = !!flag;
+        this.polygons.forEach(p => {
+            this.updateHandleStyles(p);
+            this.redraw(p, p.closed);
         });
     }
 
-    setCategories(cocoCategories = []) {
-        if (!Array.isArray(cocoCategories) || !cocoCategories.length) return;
-
-        this.categoryList = cocoCategories.map(c => {
-            const def = DEFAULT_CATEGORY_LIST.find(d => d.name === c.name);
-            return {
+    setCategories(list = []) {
+        if (Array.isArray(list) && list.length) {
+            // Cập nhật categoryList hiện tại, vẫn giữ mapping màu qua name
+            this.categoryList = list.map(c => ({
                 id: c.id,
                 name: c.name,
-                color: def?.color ?? 0xff0000
-            };
-        });
-
-        this.buildCategoryNameToId();
-        this.polygons.forEach(p => this.updateHandleStyles(p));
+                color: this.getCategoryColorByName(c.name)
+            }));
+            this.polygons.forEach(p => this.updateHandleStyles(p));
+        }
     }
 
-    getCategoryColorByName(name) {
-        const found = this.categoryList.find(c => c.name === name);
-        return found ? found.color : 0xff0000;
-    }
+    // Trả về Name mặc định thay vì ID
+    get defaultCategoryName() { return this.categoryList[0]?.name ?? DEFAULT_CATEGORY_LIST[0].name; }
 
-    getDefaultCategoryName() {
-        return this.categoryList[0]?.name ?? 'undrivable';
-    }
-
-    /* ================= DRAW ================= */
     start() {
-        const poly = {
-            points: [],
-            handles: [],
-            line: null,
-            closed: false,
-            categoryName: this.getDefaultCategoryName()
+        this.isDrawing = true;
+        // Lưu trữ bằng categoryName để dễ quản lý màu sắc
+        const poly = { 
+            points: [], 
+            handles: [], 
+            line: null, 
+            closed: false, 
+            categoryName: this.defaultCategoryName 
         };
         this.polygons.push(poly);
         this.current = poly;
-        this.isDrawing = true;
         this.select(poly);
-    }
-
-    finish() {
-        if (!this.current) return;
-        this.current.closed = true;
-        this.redraw(this.current, true);
-        this.current = null;
-        this.isDrawing = false;
-        this.updateHandleVisibility();
     }
 
     addPoint(event, camera) {
         if (!this.isDrawing || event.button !== 0 || !this.current) return;
         const pos = this.getMousePos(event, camera);
-        if (!pos) return;
-        this.current.points.push(pos.clone());
-        this.createHandle(this.current, pos);
-        this.redraw(this.current, false);
+        if (pos) {
+            this.current.points.push(pos);
+            this.createHandle(this.current, pos);
+            this.redraw(this.current, false);
+        }
     }
 
-    /* ================= HANDLE ================= */
     createHandle(poly, pos) {
         const geo = new THREE.SphereGeometry(0.12, 16, 12);
         const mat = new THREE.MeshBasicMaterial({
@@ -103,136 +83,30 @@ export class PolygonManager {
             depthWrite: false,
             transparent: true
         });
-        const h = new THREE.Mesh(geo, mat);
-        h.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z ?? 0.1));
-        h.renderOrder = 2000;
-        this.scene.add(h);
-        poly.handles.push(h);
+        const handle = new THREE.Mesh(geo, mat);
+        handle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z ?? 0.1));
+        handle.renderOrder = 2000;
+        this.scene.add(handle);
+        poly.handles.push(handle);
         this.updateHandleVisibility();
     }
 
     updateHandleStyles(poly) {
         const color = this.getCategoryColorByName(poly.categoryName);
-        poly.handles.forEach((h, i) => {
-            h.material.color.set(color);
-            const p = poly.points[i];
+        poly.handles.forEach((h, idx) => {
+            if (h.material?.color) h.material.color.set(color);
+            const p = poly.points[idx];
             if (p) h.position.set(p.x, p.y, this.flatten ? 0.1 : (p.z ?? 0.1));
         });
     }
 
     updateHandleVisibility() {
         this.polygons.forEach(p => {
-            const visible = p === this.selected || p === this.current;
+            const visible = (this.isDrawing && p === this.current) || p === this.selected;
             p.handles.forEach(h => h.visible = visible);
         });
     }
 
-    /* ================= RENDER ================= */
-    redraw(poly, closed = false) {
-        this.updateHandleStyles(poly);
-        if (poly.line) this.scene.remove(poly.line);
-        if (poly.points.length < 2) return;
-
-        const pts = this.flatten
-            ? poly.points.map(p => new THREE.Vector3(p.x, p.y, 0))
-            : poly.points;
-
-        const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        const mat = new THREE.LineBasicMaterial({
-            color: this.getCategoryColorByName(poly.categoryName),
-            linewidth: this.selected === poly ? 10 : 5,
-            depthTest: false,
-            depthWrite: false,
-            transparent: true
-        });
-
-        poly.line = closed
-            ? new THREE.LineLoop(geo, mat)
-            : new THREE.Line(geo, mat);
-
-        poly.line.renderOrder = this.selected === poly ? 2001 : 1999;
-        this.scene.add(poly.line);
-    }
-
-    /* ================= SELECT ================= */
-    select(poly) {
-        this.selected = poly;
-        this.polygons.forEach(p => this.redraw(p, p.closed));
-        this.updateHandleVisibility();
-    }
-
-    cycleCategory(dir = 1) {
-        if (!this.selected) return;
-        const idx = this.categoryList.findIndex(
-            c => c.name === this.selected.categoryName
-        );
-        const next =
-            (idx + dir + this.categoryList.length) %
-            this.categoryList.length;
-
-        this.selected.categoryName = this.categoryList[next].name;
-        this.redraw(this.selected, this.selected.closed);
-    }
-
-    /* ================= LOAD COCO ================= */
-    loadFromCoco(coco) {
-        this.clearAll();
-        this.setCategories(coco.categories);
-
-        coco.annotations.forEach(a => {
-            if (!Array.isArray(a.segmentation?.[0])) return;
-
-            const cat = coco.categories.find(c => c.id === a.category_id);
-            const name = cat?.name ?? this.getDefaultCategoryName();
-
-            const poly = {
-                points: [],
-                handles: [],
-                line: null,
-                closed: true,
-                categoryName: name
-            };
-
-            const seg = a.segmentation[0];
-            for (let i = 0; i < seg.length; i += 2) {
-                const p = new THREE.Vector3(seg[i], seg[i + 1], 0);
-                poly.points.push(p);
-                this.createHandle(poly, p);
-            }
-
-            this.polygons.push(poly);
-            this.redraw(poly, true);
-        });
-
-        this.select(this.polygons[0] ?? null);
-    }
-
-    /* ================= EXPORT COCO ================= */
-    exportCoco(image) {
-        return {
-            images: [image],
-            annotations: this.polygons
-                .filter(p => p.closed && p.points.length >= 3)
-                .map((p, i) => ({
-                    id: i + 1,
-                    image_id: image.id,
-
-                    // 🔥 NAME → ID (ĐÚNG YÊU CẦU)
-                    category_id: this.categoryNameToId[p.categoryName],
-
-                    segmentation: [
-                        p.points.flatMap(pt => [pt.x, pt.y])
-                    ],
-                    iscrowd: 0
-                })),
-            categories: this.categoryList.map(c => ({
-                id: c.id,
-                name: c.name
-            }))
-        };
-    }
-
-    /* ================= UTILS ================= */
     getMousePos(event, camera) {
         const rect = this.renderer.domElement.getBoundingClientRect();
         const mouse = new THREE.Vector2(
@@ -240,11 +114,126 @@ export class PolygonManager {
             -((event.clientY - rect.top) / rect.height) * 2 + 1
         );
         this.raycaster.setFromCamera(mouse, camera);
-        const out = new THREE.Vector3();
-        return this.raycaster.ray.intersectPlane(
-            new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-            out
-        ) ? out : null;
+        const target = new THREE.Vector3();
+        return this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), target) ? target : null;
+    }
+
+    getAllHandles() { return this.polygons.flatMap(p => p.handles); }
+    getAllLines() { return this.polygons.map(p => p.line).filter(Boolean); }
+
+    handlePointerDown(event, camera, { allowSelect = true, allowDrag = true } = {}) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const mouse = new THREE.Vector2(
+            ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            -((event.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        this.raycaster.setFromCamera(mouse, camera);
+
+        const handleHits = this.raycaster.intersectObjects(this.getAllHandles(), false);
+        if (handleHits.length) {
+            const handle = handleHits[0].object;
+            const poly = this.polygons.find(p => p.handles.includes(handle));
+            if (poly) {
+                const wasSelected = this.selected === poly;
+                if (!wasSelected && allowSelect) this.select(poly);
+                if (wasSelected && allowDrag) {
+                    this.draggedHandle = handle;
+                    this.draggedPoly = poly;
+                    return { action: 'drag-start' };
+                }
+                if (wasSelected || allowSelect) return { action: 'selected' };
+            }
+        }
+
+        const lineHits = this.raycaster.intersectObjects(this.getAllLines(), false);
+        if (lineHits.length) {
+            const line = lineHits[0].object;
+            const poly = this.polygons.find(p => p.line === line);
+            if (poly) {
+                const wasSelected = this.selected === poly;
+                if (!wasSelected && allowSelect) this.select(poly);
+                if (wasSelected || allowSelect) return { action: 'selected' };
+            }
+        }
+        return null;
+    }
+
+    onDrag(event, camera) {
+        if (!this.draggedHandle || !this.draggedPoly) return;
+        const pos = this.getMousePos(event, camera);
+        if (pos) {
+            this.draggedHandle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z ?? 0.1));
+            const index = this.draggedPoly.handles.indexOf(this.draggedHandle);
+            this.draggedPoly.points[index].copy(pos);
+            this.redraw(this.draggedPoly, this.draggedPoly.closed);
+        }
+    }
+
+    onDragEnd() { this.draggedHandle = null; this.draggedPoly = null; }
+
+    redraw(poly, closed = false) {
+        this.updateHandleStyles(poly);
+        if (poly.line) this.scene.remove(poly.line);
+        if (poly.points.length < 2) return;
+
+        const pts = this.flatten
+          ? poly.points.map(p => new THREE.Vector3(p.x, p.y, 0))
+          : poly.points;
+
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const color = this.getCategoryColorByName(poly.categoryName);
+        const isSelected = this.selected === poly;
+        const mat = new THREE.LineBasicMaterial({
+            color,
+            linewidth: isSelected ? 10 : 5,
+            depthTest: false,
+            depthWrite: false,
+            transparent: true
+        });
+        poly.line = closed ? new THREE.LineLoop(geo, mat) : new THREE.Line(geo, mat);
+        poly.line.renderOrder = isSelected ? 2001 : 1999;
+        this.scene.add(poly.line);
+    }
+
+    finish() {
+        if (this.current) {
+            this.current.closed = true;
+            this.redraw(this.current, true);
+        }
+        this.isDrawing = false;
+        this.current = null;
+        this.updateHandleVisibility();
+    }
+
+    select(poly) {
+        if (this.selected === poly) return;
+        this.selected = poly || null;
+        this.polygons.forEach(p => this.redraw(p, p.closed));
+        this.updateHandleVisibility();
+    }
+
+    deleteSelected() {
+        if (!this.selected) return;
+        const poly = this.selected;
+        poly.handles.forEach(h => this.scene.remove(h));
+        if (poly.line) this.scene.remove(poly.line);
+        this.polygons = this.polygons.filter(p => p !== poly);
+        this.selected = null;
+        this.current = null;
+        this.isDrawing = false;
+        this.updateHandleVisibility();
+    }
+
+    cycleCategory(direction = 1) {
+        if (!this.selected) return;
+        const idx = this.categoryList.findIndex(c => c.name === this.selected.categoryName);
+        if (idx === -1) this.selected.categoryName = this.defaultCategoryName;
+        else {
+            const next = (idx + direction + this.categoryList.length) % this.categoryList.length;
+            this.selected.categoryName = this.categoryList[next].name;
+        }
+        this.updateHandleStyles(this.selected);
+        this.redraw(this.selected, this.selected.closed);
     }
 
     clearAll() {
@@ -254,7 +243,72 @@ export class PolygonManager {
         });
         this.polygons = [];
         this.current = null;
-        this.selected = null;
         this.isDrawing = false;
+        this.selected = null;
+    }
+
+    /**
+     * IMPORT LOGIC
+     */
+    loadFromAnnotations(data) {
+        const annotations = data.annotations || [];
+        const incomingCategories = data.categories || [];
+        
+        // Cập nhật categoryList từ file JSON để map ID -> Name
+        this.setCategories(incomingCategories);
+        
+        this.clearAll();
+        annotations.forEach((a) => {
+            if (!a || a.shape !== 'polygon' || !Array.isArray(a.location)) return;
+            
+            // Tìm Name tương ứng với ID trong file JSON
+            const catInfo = incomingCategories.find(c => c.id === a.category_id);
+            const catName = catInfo ? catInfo.name : this.defaultCategoryName;
+
+            const pts = a.location
+                .map(pt => new THREE.Vector3(pt.x, pt.y, pt.z ?? 0))
+                .filter(v => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z));
+            
+            if (pts.length < 3) return;
+
+            const poly = {
+                points: [],
+                handles: [],
+                line: null,
+                closed: true,
+                categoryName: catName // Lưu bằng Name
+            };
+
+            this.polygons.push(poly);
+            pts.forEach(p => {
+                const clone = p.clone();
+                poly.points.push(clone);
+                this.createHandle(poly, clone);
+            });
+            this.redraw(poly, true);
+        });
+        this.select(this.polygons[0] || null);
+        this.updateHandleVisibility();
+    }
+
+    /**
+     * EXPORT LOGIC
+     */
+    getAnnotations() {
+        const closedPolys = this.polygons.filter(p => p.closed && p.points.length >= 3);
+        return {
+            annotations: closedPolys.map((p, idx) => {
+                // Map Name ngược lại ID để xuất ra COCO
+                const catInfo = this.categoryList.find(c => c.name === p.categoryName);
+                return {
+                    id: idx + 1,
+                    type: '3D',
+                    category_id: catInfo ? catInfo.id : 0,
+                    shape: 'polygon',
+                    location: p.points.map(pt => ({ x: pt.x, y: pt.y, z: pt.z ?? 0 }))
+                };
+            }),
+            categories: this.categoryList.map(c => ({ id: c.id, name: c.name }))
+        };
     }
 }
