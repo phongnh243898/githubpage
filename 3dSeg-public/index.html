@@ -282,18 +282,24 @@
           return pcdImages[0].id; // fallback: lấy pcd đầu tiên trong json
       }
 
-      function loadJsonPolygons(file) {
+function loadJsonPolygons(file) {
           const reader = new FileReader();
           reader.onload = () => {
               try {
                   const data = JSON.parse(reader.result);
-                  if (Array.isArray(data.categories)) poly.setCategories(data.categories);
                   const imageId = pickImageIdForJson(data);
                   const anns = Array.isArray(data.annotations) ? data.annotations : [];
+                  
+                  // Lọc annotations theo image_id
                   const filtered = imageId == null
                     ? anns.filter(a => a.shape === 'polygon' && a.type === '3D')
                     : anns.filter(a => a.image_id === imageId && a.shape === 'polygon' && a.type === '3D');
-                  poly.loadFromAnnotations(filtered);
+                  
+                  // TRUYỀN CẢ DATA CHỨA CATEGORIES
+                  poly.loadFromAnnotations({
+                      annotations: filtered,
+                      categories: data.categories || []
+                  });
               } catch (err) {
                   console.error('Invalid JSON', err);
               }
@@ -327,14 +333,13 @@
 
       document.getElementById('apply').onclick = apply;
 
-      document.getElementById('export').onclick = () => {
+document.getElementById('export').onclick = () => {
           const data = poly.getAnnotations();
-          data.categories = CATEGORY_LIST.map(c => ({ id: c.id, name: c.name }));
           const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'polygons.json';
+          a.download = currentPcdName ? currentPcdName.replace('.pcd', '.json') : 'polygons.json';
           a.click();
           URL.revokeObjectURL(url);
       };
