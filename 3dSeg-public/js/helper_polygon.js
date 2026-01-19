@@ -1,4 +1,3 @@
-// v1
 import * as THREE from 'three';
 
 const DEFAULT_CATEGORY_LIST = [
@@ -22,9 +21,9 @@ export class PolygonManager {
         this.flatten = false;
     }
 
-    // Hàm lấy màu dựa trên tên lớp (Yêu cầu quan trọng nhất)
-    getCategoryColorByName(name) {
-        const found = DEFAULT_CATEGORY_LIST.find(c => c.name === name);
+    // Hàm nội bộ để tìm màu sắc dựa trên Tên lớp
+    _getColorByName(name) {
+        const found = DEFAULT_CATEGORY_LIST.find(d => d.name === name);
         return found ? found.color : 0xff0000;
     }
 
@@ -41,8 +40,8 @@ export class PolygonManager {
             this.categoryList = list.map(c => ({
                 id: c.id,
                 name: c.name,
-                // Luôn cập nhật màu từ DEFAULT_LIST dựa trên name để hiển thị đúng
-                color: this.getCategoryColorByName(c.name)
+                // Luôn cập nhật màu hiển thị theo Name từ DEFAULT_LIST
+                color: this._getColorByName(c.name)
             }));
             this.polygons.forEach(p => this.updateHandleStyles(p));
         }
@@ -71,10 +70,8 @@ export class PolygonManager {
 
     createHandle(poly, pos) {
         const geo = new THREE.SphereGeometry(0.12, 16, 12);
-        // Lấy màu thông qua Name thay vì ID
-        const categoryName = this.categoryList.find(c => c.id === poly.categoryId)?.name;
         const mat = new THREE.MeshBasicMaterial({
-            color: this.getCategoryColorByName(categoryName),
+            color: this.getCategoryColor(poly.categoryId),
             depthTest: false,
             depthWrite: false,
             transparent: true
@@ -88,8 +85,7 @@ export class PolygonManager {
     }
 
     updateHandleStyles(poly) {
-        const categoryName = this.categoryList.find(c => c.id === poly.categoryId)?.name;
-        const color = this.getCategoryColorByName(categoryName);
+        const color = this.getCategoryColor(poly.categoryId);
         poly.handles.forEach((h, idx) => {
             if (h.material?.color) h.material.color.set(color);
             const p = poly.points[idx];
@@ -178,11 +174,7 @@ export class PolygonManager {
           : poly.points;
 
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        
-        // Lấy màu dựa trên Name thay vì ID
-        const categoryName = this.categoryList.find(c => c.id === poly.categoryId)?.name;
-        const color = this.getCategoryColorByName(categoryName);
-        
+        const color = this.getCategoryColor(poly.categoryId);
         const isSelected = this.selected === poly;
         const mat = new THREE.LineBasicMaterial({
             color,
@@ -250,17 +242,15 @@ export class PolygonManager {
 
     getCategoryColor(id) {
         const found = this.categoryList.find(c => c.id === id);
-        return found ? found.color : 0xff0000;
+        // SỬA CHÍNH: Lấy màu dựa trên Name thay vì ID
+        return found ? this._getColorByName(found.name) : 0xff0000;
     }
 
-    // --- Cập nhật logic Import/Export ---
-
     loadFromAnnotations(data) {
-        // Hỗ trợ cả mảng cũ hoặc object COCO mới
         const annotations = data.annotations || (Array.isArray(data) ? data : []);
         const categories = data.categories || [];
         
-        // Nếu có categories đi kèm, cập nhật để biết ID nào tương ứng Name nào
+        // Đồng bộ danh sách category để biết ID nào ứng với Tên nào
         if (categories.length) {
             this.setCategories(categories);
         }
@@ -271,6 +261,7 @@ export class PolygonManager {
             const pts = a.location
                 .map(pt => new THREE.Vector3(pt.x, pt.y, pt.z ?? 0))
                 .filter(v => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z));
+            
             if (pts.length < 3) return;
             
             const poly = {
