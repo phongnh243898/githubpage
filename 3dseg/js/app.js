@@ -17,7 +17,7 @@ const render3d = document.getElementById('render3d');
 if (!render3d) throw new Error('#render3d not found');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setClearColor(0x0d0d0d, 1);
+renderer.setClearColor(0xa2a2a2, 1);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 render3d.appendChild(renderer.domElement);
 
@@ -267,4 +267,5 @@ function startRender() {
 function stopRender() { isRendering = false; }
 
 resizeRenderer();
+
 startRender();
