@@ -58,6 +58,8 @@ class VideoManager {
     wrap.style.width = `${width}px`;
     wrap.style.height = `${height}px`;
     wrap.tabIndex = 0;
+    wrap.style.position = "relative";
+    wrap.style.overflow = "visible";
 
     this.content = document.createElement("div");
     this.content.style.position = "absolute";
@@ -81,19 +83,16 @@ class VideoManager {
       const h = document.createElement("div");
       h.dataset.dir = d;
       h.style.position = "absolute";
-      h.style.width = d.includes("n") || d.includes("s") ? "100%" : "10px";
-      h.style.height = d.includes("e") || d.includes("w") ? "100%" : "10px";
       h.style.background = "transparent";
       h.style.cursor = `${d}-resize`;
       h.style.zIndex = 5;
+      // default size
+      h.style.width = d.length === 1 ? (["n", "s"].includes(d) ? "100%" : "10px") : "10px";
+      h.style.height = d.length === 1 ? (["e", "w"].includes(d) ? "100%" : "10px") : "10px";
       if (d.includes("n")) h.style.top = "-4px";
       if (d.includes("s")) h.style.bottom = "-4px";
       if (d.includes("e")) h.style.right = "-4px";
       if (d.includes("w")) h.style.left = "-4px";
-      if (["ne", "nw", "se", "sw"].includes(d)) {
-        h.style.width = "10px";
-        h.style.height = "10px";
-      }
       wrap.appendChild(h);
       this.handles[d] = h;
     });
@@ -169,6 +168,7 @@ class VideoManager {
     window.addEventListener("keyup", this._onKeyUp, true);
   }
 
+  // Sử dụng arrow function để giữ đúng this
   _onKeyDown = (e) => {
     if (e.code === "Space") {
       if (this._spaceLock) return;
@@ -195,6 +195,7 @@ class VideoManager {
     }
   };
 
+  // CHUYỂN THÀNH ARROW FUNCTION ĐỂ GIỮ BỐI CẢNH ĐÚNG
   _onResizeMove = (e) => {
     if (!this.state.isResizing) return;
     const { width, height, x, y } = this.state.startSize;
@@ -209,11 +210,12 @@ class VideoManager {
     if (dir.includes("s")) newH = height + dy;
     if (dir.includes("n")) newH = height - dy;
 
+    // Minimum size 50x50
     this.domContainer.style.width = `${Math.max(50, newW)}px`;
     this.domContainer.style.height = `${Math.max(50, newH)}px`;
   };
 
-  _onResizeUp = () => {
+  _onResizeUp = (e) => {
     this.state.isResizing = false;
     this.state.resizeDir = null;
     document.removeEventListener("pointermove", this._onResizeMove);
@@ -228,7 +230,7 @@ class VideoManager {
     this._applyTransform();
   };
 
-  _onPanUp = () => {
+  _onPanUp = (e) => {
     this.state.isPanning = false;
     document.removeEventListener("pointermove", this._onPanMove);
   };
@@ -251,6 +253,7 @@ class VideoManager {
   }
 }
 
+// Khởi tạo & sử dụng
 const container = document.querySelector("#view-video3d");
 const input = document.querySelector("#videoFile");
 const vm = new VideoManager(container);
