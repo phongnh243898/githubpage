@@ -2,10 +2,10 @@ import * as THREE from 'three';
 
 // Luôn chỉ sửa color tại đây khi cần thêm category mới!
 const DEFAULT_CATEGORY_LIST = [
-    { id: 205340, name: 'undrivable',   color: 0xff0000 },
-    { id: 205341, name: 'things',       color: 0xffff00 },
-    { id: 205342, name: 'construction', color: 0x800080 },
-    { id: 205343, name: 'uneven',       color: 0xffffff }
+    { id: 207733, name: 'undrivable',   color: 0xff0000 },
+    { id: 207734, name: 'things',       color: 0xffff00 },
+    { id: 207735, name: 'construction', color: 0x800080 },
+    { id: 207736, name: 'uneven',       color: 0xffffff }
 ];
 
 export class PolygonManager {
