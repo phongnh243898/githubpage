@@ -35,6 +35,15 @@ export function buildDistanceColor(minValue, maxValue, startColor, endColor, rep
     `;
 }
 
+// Reinhard tone mapping: output = color / (color + strength)
+export function buildReinhardColor(strength = 1.0) {
+    return `
+        vec3 linearRGB = vColor.rgb; // If vColor is already in linear space
+        vec3 toneMapped = linearRGB / (linearRGB + vec3(${Number(strength).toFixed(4)}));
+        gl_FragColor = vec4(toneMapped, 1.0);
+    `;
+}
+
 export function updatePCDShader(THREE, pcdMesh, state) {
     if (!pcdMesh) return;
     if (pcdMesh.material) pcdMesh.material.dispose();
@@ -42,8 +51,8 @@ export function updatePCDShader(THREE, pcdMesh, state) {
     const vertexShader = `
         precision highp float;
         varying vec3 vColor;
-        varying vec3 vPosition;   // flattened if projectOXY
-        varying vec3 vOriginal;   // original 3D position
+        varying vec3 vPosition;
+        varying vec3 vOriginal;
         uniform float uSize; 
         void main() {
             vColor = color;
@@ -71,8 +80,12 @@ export function updatePCDShader(THREE, pcdMesh, state) {
 
     let colorLogic = buildDefaultColor();
     if (state.colorMode === 'bw') colorLogic = buildBWColor();
-    if (state.colorMode === 'height') colorLogic = buildHeightColor(state.hZMin, state.hZMax, state.hStart, state.hEnd, state.hRepeat, state.hMode);
-    if (state.colorMode === 'distance') colorLogic = buildDistanceColor(state.dMin, state.dMax, state.dStart, state.dEnd, state.dRepeat, state.dMode);
+    if (state.colorMode === 'height')
+        colorLogic = buildHeightColor(state.hZMin, state.hZMax, state.hStart, state.hEnd, state.hRepeat, state.hMode);
+    if (state.colorMode === 'distance')
+        colorLogic = buildDistanceColor(state.dMin, state.dMax, state.dStart, state.dEnd, state.dRepeat, state.dMode);
+    if (state.colorMode === 'reinhard')
+        colorLogic = buildReinhardColor(state.reinhardStrength);
 
     pcdMesh.material = new THREE.ShaderMaterial({
         uniforms: { uSize: { value: state.pointSize } },
