@@ -43,8 +43,9 @@
   <button id="settingBtn">⚙</button>
   <div id="layout">
     <div id="viewWrap">
-      <div id="render3d"></div>
+      
     </div>
+    <div id="render3d"></div>
     <div id="sidebarRight">
       <h3>Data</h3>
       <input type="file" id="pcdFile" accept=".pcd,.json" />
@@ -161,7 +162,7 @@
       let camera = persCam, controls = new OrbitControls(camera, renderer.domElement), points = null;
       const poly = new PolygonManager(scene, renderer);
       poly.setCategories(CATEGORY_LIST);
-      const videoMgr = new VideoManager(document.body);
+      const videoMgr = new VideoManager(document.querySelector("viewWrap"));
 
       let activeRegion = 'render3d';
       let isRendering = false;
