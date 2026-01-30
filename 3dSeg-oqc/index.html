@@ -34,7 +34,7 @@
     #settingBtn { position: absolute; top: 10px; right: 10px; z-index: 3000; background: #444; color: #fff; border: 1px solid #666; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
 
     /* video view */
-    #videoView { position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #videoView { position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content [...]
     #videoView video { max-width: none; max-height: none; transform-origin: center center; }
     #videoView .resize-handle { position: absolute; width: 14px; height: 14px; right: 0; top: 0; background: #00aaff; cursor: nwse-resize; }
   </style>
@@ -61,6 +61,7 @@
           <option value="bw">B&W</option>
           <option value="height">Height Gradient</option>
           <option value="distance">Dist Gradient</option>
+          <option value="reinhard">Reinhard Tone Mapping</option>
         </select>
         <div id="gradOpts" style="display:none">
           <div class="row-2">
@@ -76,6 +77,11 @@
             <input type="number" id="rep" value="1" step="0.1">
             <select id="mode"><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select>
           </div>
+        </div>
+        <div id="reinhardOpts" style="display:none">
+          <label>Reinhard Strength</label>
+          <input type="number" id="reinhardStrength" value="1.0" min="0" max="10" step="0.01">
+          <p style="font-size:12px;color:#aaa;margin-top:-8px;">Áp dụng tone mapping lên giá trị Linear RGB: out = color / (color + strength)</p>
         </div>
       </div>
 
@@ -159,8 +165,8 @@
 
       let activeRegion = 'render3d';
       let isRendering = false;
-      let currentPcdName = null; // basename của file pcd hiện tại (nếu có)
-      let selectionArmed = false; // require E + click to select/edit
+      let currentPcdName = null;
+      let selectionArmed = false;
 
       const basename = (p = '') => p.split(/[\\/]/).pop() || '';
       const isPcdNameMatch = (jsonName, loadedName) => {
@@ -195,7 +201,7 @@
           controls.dispose();
 
           if(is2D) {
-              camera = orthoCam; // Bắt buộc dùng OrthographicCamera cho PlaneOXY
+              camera = orthoCam;
               orthoCam.position.copy(target).add(new THREE.Vector3(0,0,50));
               orthoCam.lookAt(target);
               orthoCam.zoom = lastZoom;
@@ -220,8 +226,13 @@
           resizeRenderer();
       }
 
+      // Hiển thị các option khi đổi màu
       document.getElementById('colorMode').onchange = e => {
-          document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
+          const gradBlock = document.getElementById('gradOpts');
+          const reinhardBlock = document.getElementById('reinhardOpts');
+          let mode = e.target.value;
+          gradBlock.style.display = (mode === 'height' || mode === 'distance') ? 'block' : 'none';
+          reinhardBlock.style.display = (mode === 'reinhard') ? 'block' : 'none';
       };
       document.getElementById('fType').onchange = e => {
           document.getElementById('filterOpts').style.display = (e.target.value === 'none') ? 'none' : 'block';
@@ -253,18 +264,20 @@
       function apply() {
           if(!points) return;
           const is2D = document.getElementById('oxy').checked;
-          setupControls(is2D); // đảm bảo PlaneOXY luôn ở OrthographicCamera
+          setupControls(is2D);
           poly.setFlatten(is2D);
           const fType = document.getElementById('fType').value;
+          const colorMode = document.getElementById('colorMode').value;
           updatePCDShader(THREE, points, {
               pointSize: parseFloat(document.getElementById('size').value),
-              colorMode: document.getElementById('colorMode').value,
+              colorMode,
               hZMin: parseFloat(document.getElementById('min').value), hZMax: parseFloat(document.getElementById('max').value),
               hStart: new THREE.Color(document.getElementById('c1').value), hEnd: new THREE.Color(document.getElementById('c2').value),
               hRepeat: parseFloat(document.getElementById('rep').value), hMode: document.getElementById('mode').value,
               dMin: parseFloat(document.getElementById('min').value), dMax: parseFloat(document.getElementById('max').value),
               dStart: new THREE.Color(document.getElementById('c1').value), dEnd: new THREE.Color(document.getElementById('c2').value),
               dRepeat: parseFloat(document.getElementById('rep').value), dMode: document.getElementById('mode').value,
+              reinhardStrength: parseFloat(document.getElementById('reinhardStrength').value) || 1.0,
               filterType: fType, fMin: parseFloat(document.getElementById('fMin').value), fMax: parseFloat(document.getElementById('fMax').value),
               projectOXY: is2D
           });
@@ -279,7 +292,7 @@
               const match = pcdImages.find(img => isPcdNameMatch(img.file_name, currentPcdName));
               if (match) return match.id;
           }
-          return pcdImages[0].id; // fallback: lấy pcd đầu tiên trong json
+          return pcdImages[0].id;
       }
 
       function loadJsonPolygons(file) {
