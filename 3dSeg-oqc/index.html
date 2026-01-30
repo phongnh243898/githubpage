@@ -77,6 +77,7 @@
             <select id="mode"><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select>
           </div>
         </div>
+        <!-- Thêm block này, mọi phần khác giữ nguyên -->
         <div id="reinhardOpts" style="display:none">
           <label>Exposure</label>
           <input type="number" id="reinhardExposure" value="1.0" min="0.01" max="10" step="0.01">
@@ -133,6 +134,7 @@
       ];
 
       const render3d = document.getElementById('render3d');
+      const viewWrap = document.getElementById('viewWrap');
       if (!render3d) { console.error('Element #render3d not found'); return; }
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -161,7 +163,7 @@
       let camera = persCam, controls = new OrbitControls(camera, renderer.domElement), points = null;
       const poly = new PolygonManager(scene, renderer);
       poly.setCategories(CATEGORY_LIST);
-      const videoMgr = new VideoManager(document.getElementById('viewWrap'));
+      const videoMgr = new VideoManager(viewWrap); // đảm bảo luôn trong viewer chính
 
       let activeRegion = 'render3d';
       let isRendering = false;
@@ -226,7 +228,6 @@
           resizeRenderer();
       }
 
-      // Xử lý hiện/ẩn các option cho từng chế độ màu
       document.getElementById('colorMode').onchange = e => {
           document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
           document.getElementById('reinhardOpts').style.display = (e.target.value === 'reinhard') ? 'block' : 'none';
