@@ -33,7 +33,8 @@
 
     #settingBtn { position: absolute; top: 10px; right: 10px; z-index: 3000; background: #444; color: #fff; border: 1px solid #666; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
 
-    #videoView { position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content: center; }
+    /* video view */
+    #videoView { position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content [...]
     #videoView video { max-width: none; max-height: none; transform-origin: center center; }
     #videoView .resize-handle { position: absolute; width: 14px; height: 14px; right: 0; top: 0; background: #00aaff; cursor: nwse-resize; }
   </style>
@@ -41,9 +42,8 @@
 <body>
   <button id="settingBtn">⚙</button>
   <div id="layout">
-    <div id="viewWrap">
-      <div id="render3d"></div>
-    </div>
+    <div id="viewWrap"></div>
+    <div id="render3d"></div>
     <div id="sidebarRight">
       <h3>Data</h3>
       <input type="file" id="pcdFile" accept=".pcd,.json" />
@@ -60,7 +60,7 @@
           <option value="bw">B&W</option>
           <option value="height">Height Gradient</option>
           <option value="distance">Dist Gradient</option>
-          <option value="reinhard">Reinhard (Linear RGB)</option>
+          <option value="reinhard">Reinhard Tone Mapping</option>
         </select>
         <div id="gradOpts" style="display:none">
           <div class="row-2">
@@ -77,12 +77,10 @@
             <select id="mode"><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select>
           </div>
         </div>
-        <!-- Thêm block này, mọi phần khác giữ nguyên -->
         <div id="reinhardOpts" style="display:none">
-          <label>Exposure</label>
-          <input type="number" id="reinhardExposure" value="1.0" min="0.01" max="10" step="0.01">
           <label>Reinhard Strength</label>
-          <input type="number" id="reinhardStrength" value="1.0" min="0.01" max="10" step="0.01">
+          <input type="number" id="reinhardStrength" value="1.0" min="0" max="10" step="0.01">
+          <p style="font-size:12px;color:#aaa;margin-top:-8px;">Áp dụng tone mapping lên giá trị Linear RGB: out = color / (color + strength)</p>
         </div>
       </div>
 
@@ -134,7 +132,6 @@
       ];
 
       const render3d = document.getElementById('render3d');
-      const viewWrap = document.getElementById('viewWrap');
       if (!render3d) { console.error('Element #render3d not found'); return; }
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -163,7 +160,7 @@
       let camera = persCam, controls = new OrbitControls(camera, renderer.domElement), points = null;
       const poly = new PolygonManager(scene, renderer);
       poly.setCategories(CATEGORY_LIST);
-      const videoMgr = new VideoManager(viewWrap); // đảm bảo luôn trong viewer chính
+      const videoMgr = new VideoManager(document.querySelector("#viewWrap"));
 
       let activeRegion = 'render3d';
       let isRendering = false;
@@ -228,9 +225,13 @@
           resizeRenderer();
       }
 
+      // Hiển thị các option khi đổi màu
       document.getElementById('colorMode').onchange = e => {
-          document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
-          document.getElementById('reinhardOpts').style.display = (e.target.value === 'reinhard') ? 'block' : 'none';
+          const gradBlock = document.getElementById('gradOpts');
+          const reinhardBlock = document.getElementById('reinhardOpts');
+          let mode = e.target.value;
+          gradBlock.style.display = (mode === 'height' || mode === 'distance') ? 'block' : 'none';
+          reinhardBlock.style.display = (mode === 'reinhard') ? 'block' : 'none';
       };
       document.getElementById('fType').onchange = e => {
           document.getElementById('filterOpts').style.display = (e.target.value === 'none') ? 'none' : 'block';
@@ -262,19 +263,21 @@
       function apply() {
           if(!points) return;
           const is2D = document.getElementById('oxy').checked;
+          setupControls(is2D);
+          poly.setFlatten(is2D);
+          const fType = document.getElementById('fType').value;
+          const colorMode = document.getElementById('colorMode').value;
           updatePCDShader(THREE, points, {
               pointSize: parseFloat(document.getElementById('size').value),
-              colorMode: document.getElementById('colorMode').value,
+              colorMode,
               hZMin: parseFloat(document.getElementById('min').value), hZMax: parseFloat(document.getElementById('max').value),
               hStart: new THREE.Color(document.getElementById('c1').value), hEnd: new THREE.Color(document.getElementById('c2').value),
               hRepeat: parseFloat(document.getElementById('rep').value), hMode: document.getElementById('mode').value,
               dMin: parseFloat(document.getElementById('min').value), dMax: parseFloat(document.getElementById('max').value),
               dStart: new THREE.Color(document.getElementById('c1').value), dEnd: new THREE.Color(document.getElementById('c2').value),
               dRepeat: parseFloat(document.getElementById('rep').value), dMode: document.getElementById('mode').value,
-              reinhardStrength: parseFloat(document.getElementById('reinhardStrength').value)||1.0,
-              reinhardExposure: parseFloat(document.getElementById('reinhardExposure').value)||1.0,
-              filterType: document.getElementById('fType').value,
-              fMin: parseFloat(document.getElementById('fMin').value), fMax: parseFloat(document.getElementById('fMax').value),
+              reinhardStrength: parseFloat(document.getElementById('reinhardStrength').value) || 1.0,
+              filterType: fType, fMin: parseFloat(document.getElementById('fMin').value), fMax: parseFloat(document.getElementById('fMax').value),
               projectOXY: is2D
           });
       }
