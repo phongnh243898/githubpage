@@ -183,6 +183,7 @@
       function resizeRenderer() {
           const { clientWidth, clientHeight } = render3d;
           renderer.setSize(clientWidth, clientHeight);
+          poly.updateResolution(clientWidth, clientHeight);
           if (camera.isPerspectiveCamera) camera.aspect = clientWidth / clientHeight;
           if (camera.isOrthographicCamera) {
               const aspect = clientWidth / clientHeight;
