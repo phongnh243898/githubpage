@@ -17,11 +17,19 @@ export class PolygonManager {
         this.isDrawing = false;
         this.raycaster = new THREE.Raycaster();
         this.raycaster.params.Line = { threshold: 0.15 };
+        this.raycaster.params.Points = { threshold: 0.3 };
         this.selected = null;
         this.categoryList = [...DEFAULT_CATEGORY_LIST];
         this.flatten = false;
         this.draggedHandle = null;
         this.draggedPoly = null;
+        
+        // Preview edge (nét đứt)
+        this.previewLine = null;
+        
+        // Hover state
+        this.hoveredHandle = null;
+        this.hoveredEdge = null;
     }
 
     // --- Category handling ---
@@ -58,7 +66,6 @@ export class PolygonManager {
 
     start() {
         this.isDrawing = true;
-        // KHỞI TẠO LUÔN LUÔN CÓ categoryName!
         const catName = this.defaultCategoryName;
         const poly = { points: [], handles: [], line: null, closed: false, categoryName: catName };
         this.polygons.push(poly);
@@ -68,16 +75,103 @@ export class PolygonManager {
 
     addPoint(event, camera) {
         if (!this.isDrawing || event.button !== 0 || !this.current) return;
+        
         const pos = this.getMousePos(event, camera);
-        if (pos) {
-            this.current.points.push(pos);
-            this.createHandle(this.current, pos);
-            this.redraw(this.current, false);
+        if (!pos) return;
+
+        // Chỉ thêm điểm mới
+        this.current.points.push(pos);
+        this.createHandle(this.current, pos);
+        this.redraw(this.current, false);
+    }
+
+    // Finish polygon (gọi khi nhấn ESC)
+    finish() {
+        if (!this.current || this.current.points.length < 3) {
+            console.warn('Cần ít nhất 3 điểm để tạo polygon');
+            return;
+        }
+        this.current.closed = true;
+        this.redraw(this.current, true);
+        this.removePreviewLine();
+        this.isDrawing = false;
+        this.updateHandleVisibility();
+    }
+
+    // Cancel drawing
+    cancel() {
+        if (!this.current) return;
+        this.current.handles.forEach(h => {
+            if (h.geometry) h.geometry.dispose();
+            if (h.material) h.material.dispose();
+            this.scene.remove(h);
+        });
+        if (this.current.line) {
+            if (this.current.line.geometry) this.current.line.geometry.dispose();
+            if (this.current.line.material) this.current.line.material.dispose();
+            this.scene.remove(this.current.line);
+        }
+        const idx = this.polygons.indexOf(this.current);
+        if (idx !== -1) this.polygons.splice(idx, 1);
+        this.current = null;
+        this.isDrawing = false;
+        this.removePreviewLine();
+    }
+
+    // Update preview line khi di chuột
+    updatePreview(event, camera) {
+        if (!this.isDrawing || !this.current || this.current.points.length === 0) {
+            this.removePreviewLine();
+            return;
+        }
+
+        const pos = this.getMousePos(event, camera);
+        if (!pos) {
+            this.removePreviewLine();
+            return;
+        }
+
+        const lastPoint = this.current.points[this.current.points.length - 1];
+        const pts = this.flatten
+            ? [new THREE.Vector3(lastPoint.x, lastPoint.y, 0), new THREE.Vector3(pos.x, pos.y, 0)]
+            : [lastPoint, pos];
+
+        // Dispose geometry cũ
+        if (this.previewLine) {
+            if (this.previewLine.geometry) this.previewLine.geometry.dispose();
+            if (this.previewLine.material) this.previewLine.material.dispose();
+            this.scene.remove(this.previewLine);
+        }
+
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const catName = this.current.categoryName || this.defaultCategoryName;
+        const color = this.getCategoryColor(catName);
+        const mat = new THREE.LineDashedMaterial({
+            color,
+            linewidth: 2,
+            dashSize: 0.2,
+            gapSize: 0.1,
+            depthTest: false,
+            depthWrite: false,
+            transparent: true,
+            opacity: 0.7
+        });
+        this.previewLine = new THREE.Line(geo, mat);
+        this.previewLine.computeLineDistances();
+        this.previewLine.renderOrder = 2002;
+        this.scene.add(this.previewLine);
+    }
+
+    removePreviewLine() {
+        if (this.previewLine) {
+            if (this.previewLine.geometry) this.previewLine.geometry.dispose();
+            if (this.previewLine.material) this.previewLine.material.dispose();
+            this.scene.remove(this.previewLine);
+            this.previewLine = null;
         }
     }
 
     createHandle(poly, pos) {
-        // LUÔN DÙNG ĐÚNG TÊN CHO MÀU!
         const catName = poly.categoryName || this.defaultCategoryName;
         const geo = new THREE.SphereGeometry(0.12, 16, 12);
         const mat = new THREE.MeshBasicMaterial({
@@ -125,7 +219,8 @@ export class PolygonManager {
     getAllHandles() { return this.polygons.flatMap(p => p.handles); }
     getAllLines() { return this.polygons.map(p => p.line).filter(Boolean); }
 
-    handlePointerDown(event, camera, { allowSelect = true, allowDrag = true } = {}) {
+    // *** THÊM: Hover detection với cursor change
+    updateHover(event, camera) {
         const rect = this.renderer.domElement.getBoundingClientRect();
         const mouse = new THREE.Vector2(
             ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -133,6 +228,48 @@ export class PolygonManager {
         );
         this.raycaster.setFromCamera(mouse, camera);
 
+        // Reset hover state
+        this.hoveredHandle = null;
+        this.hoveredEdge = null;
+
+        // Chỉ kiểm tra khi có polygon đang được chọn
+        if (!this.selected) {
+            this.renderer.domElement.style.cursor = 'default';
+            return null;
+        }
+
+        // 1. Ưu tiên kiểm tra handle (điểm) trước
+        const handleHits = this.raycaster.intersectObjects(this.selected.handles, false);
+        if (handleHits.length > 0) {
+            this.hoveredHandle = handleHits[0].object;
+            this.renderer.domElement.style.cursor = 'move';
+            return { type: 'handle', object: this.hoveredHandle };
+        }
+
+        // 2. Kiểm tra edge (cạnh)
+        if (this.selected.line && this.selected.closed) {
+            const lineHits = this.raycaster.intersectObject(this.selected.line, false);
+            if (lineHits.length > 0) {
+                this.hoveredEdge = lineHits[0];
+                this.renderer.domElement.style.cursor = 'crosshair';
+                return { type: 'edge', hit: this.hoveredEdge };
+            }
+        }
+
+        // 3. Không hover gì
+        this.renderer.domElement.style.cursor = 'default';
+        return null;
+    }
+
+    handlePointerDown(event, camera, { allowSelect = true, allowDrag = true, allowAddPoint = true } = {}) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const mouse = new THREE.Vector2(
+            ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            -((event.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        this.raycaster.setFromCamera(mouse, camera);
+
+        // 1. Ưu tiên handle (drag điểm)
         const handleHits = this.raycaster.intersectObjects(this.getAllHandles(), false);
         if (handleHits.length) {
             const handle = handleHits[0].object;
@@ -149,6 +286,16 @@ export class PolygonManager {
             }
         }
 
+        // 2. Kiểm tra edge (thêm điểm)
+        if (this.selected && this.selected.closed && allowAddPoint) {
+            const lineHits = this.raycaster.intersectObject(this.selected.line, false);
+            if (lineHits.length > 0) {
+                this.addPointOnEdge(lineHits[0]);
+                return { action: 'point-added' };
+            }
+        }
+
+        // 3. Kiểm tra line (select polygon)
         const lineHits = this.raycaster.intersectObjects(this.getAllLines(), false);
         if (lineHits.length) {
             const line = lineHits[0].object;
@@ -160,6 +307,60 @@ export class PolygonManager {
             }
         }
         return null;
+    }
+
+    // *** THÊM: Thêm điểm vào giữa cạnh
+    addPointOnEdge(hit) {
+        if (!this.selected || !this.selected.closed) return;
+
+        const point = hit.point;
+        const poly = this.selected;
+
+        // Tìm cạnh gần nhất
+        let minDist = Infinity;
+        let insertIdx = -1;
+
+        for (let i = 0; i < poly.points.length; i++) {
+            const p1 = poly.points[i];
+            const p2 = poly.points[(i + 1) % poly.points.length];
+
+            const line = new THREE.Line3(p1, p2);
+            const closestPoint = new THREE.Vector3();
+            line.closestPointToPoint(point, true, closestPoint);
+            const dist = point.distanceTo(closestPoint);
+
+            if (dist < minDist) {
+                minDist = dist;
+                insertIdx = i + 1;
+            }
+        }
+
+        if (insertIdx !== -1) {
+            const newPoint = point.clone();
+            if (this.flatten) newPoint.z = 0;
+
+            // Chèn điểm mới
+            poly.points.splice(insertIdx, 0, newPoint);
+
+            // Tạo handle mới
+            const catName = poly.categoryName || this.defaultCategoryName;
+            const geo = new THREE.SphereGeometry(0.12, 16, 12);
+            const mat = new THREE.MeshBasicMaterial({
+                color: this.getCategoryColor(catName),
+                depthTest: false,
+                depthWrite: false,
+                transparent: true
+            });
+            const handle = new THREE.Mesh(geo, mat);
+            handle.position.set(newPoint.x, newPoint.y, this.flatten ? 0.1 : (newPoint.z ?? 0.1));
+            handle.renderOrder = 2000;
+            this.scene.add(handle);
+
+            poly.handles.splice(insertIdx, 0, handle);
+
+            // Redraw
+            this.redraw(poly, poly.closed);
+        }
     }
 
     onDrag(event, camera) {
@@ -175,16 +376,24 @@ export class PolygonManager {
 
     onDragEnd() { this.draggedHandle = null; this.draggedPoly = null; }
 
+    // Dispose geometry cũ trước khi tạo mới
     redraw(poly, closed = false) {
         this.updateHandleStyles(poly);
-        if (poly.line) this.scene.remove(poly.line);
+        
+        // Dispose old resources
+        if (poly.line) {
+            if (poly.line.geometry) poly.line.geometry.dispose();
+            if (poly.line.material) poly.line.material.dispose();
+            this.scene.remove(poly.line);
+            poly.line = null;
+        }
+        
         if (poly.points.length < 2) return;
 
         const pts = this.flatten
             ? poly.points.map(p => new THREE.Vector3(p.x, p.y, 0))
             : poly.points;
 
-        // <<< TH��M DÒNG NÀY!!! (bị thiếu ở bản trước)
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
 
         const catName = poly.categoryName || this.defaultCategoryName;
@@ -202,9 +411,14 @@ export class PolygonManager {
         this.scene.add(poly.line);
     }
 
+    select(poly) {
+        this.selected = poly;
+        this.polygons.forEach(p => this.redraw(p, p.closed));
+        this.updateHandleVisibility();
+    }
+
     cycleCategory(direction = 1) {
         if (!this.selected) return;
-        // Chỉ xử lý trên name!
         const currentIdx = this.categoryList.findIndex(c => c.name === this.selected.categoryName);
         let nextIdx = 0;
         if (currentIdx !== -1) {
@@ -215,11 +429,45 @@ export class PolygonManager {
         this.redraw(this.selected, this.selected.closed);
     }
 
+    // Xóa polygon đang được chọn
+    deleteSelected() {
+        if (!this.selected) return;
+        
+        // Remove handles
+        this.selected.handles.forEach(h => {
+            if (h.geometry) h.geometry.dispose();
+            if (h.material) h.material.dispose();
+            this.scene.remove(h);
+        });
+        
+        // Remove line
+        if (this.selected.line) {
+            if (this.selected.line.geometry) this.selected.line.geometry.dispose();
+            if (this.selected.line.material) this.selected.line.material.dispose();
+            this.scene.remove(this.selected.line);
+        }
+        
+        // Remove from array
+        const idx = this.polygons.indexOf(this.selected);
+        if (idx !== -1) this.polygons.splice(idx, 1);
+        
+        this.selected = null;
+    }
+
     clearAll() {
         this.polygons.forEach(p => {
-            p.handles.forEach(h => this.scene.remove(h));
-            if (p.line) this.scene.remove(p.line);
+            p.handles.forEach(h => {
+                if (h.geometry) h.geometry.dispose();
+                if (h.material) h.material.dispose();
+                this.scene.remove(h);
+            });
+            if (p.line) {
+                if (p.line.geometry) p.line.geometry.dispose();
+                if (p.line.material) p.line.material.dispose();
+                this.scene.remove(p.line);
+            }
         });
+        this.removePreviewLine();
         this.polygons = [];
         this.current = null;
         this.isDrawing = false;
@@ -228,15 +476,9 @@ export class PolygonManager {
 
     // --- Load & Export ---
 
-    /**
-     * Load annotation chuẩn COCO, mapping id → name, mỗi polygon luôn có categoryName
-     * @param {Array} annotations
-     * @param {Array} categories
-     */
     loadFromAnnotations(annotations = [], categories = []) {
         this.clearAll();
 
-        // Tạo map từ id sang name, ưu tiên dữ liệu truyền vào, fallback theo mặc định
         const idToName = {};
         categories.forEach(c => { idToName[c.id] = c.name; });
         DEFAULT_CATEGORY_LIST.forEach(c => { if (!idToName[c.id]) idToName[c.id] = c.name; });
@@ -253,7 +495,7 @@ export class PolygonManager {
                 handles: [],
                 line: null,
                 closed: true,
-                categoryName: catName // chỉ lưu tên
+                categoryName: catName
             };
             this.polygons.push(poly);
             pts.forEach(p => {
@@ -267,14 +509,10 @@ export class PolygonManager {
         this.updateHandleVisibility();
     }
 
-    /**
-     * Export ra annotation chuẩn COCO, mapping name → id từ DEFAULT_CATEGORY_LIST
-     */
     getAnnotations() {
         const closedPolys = this.polygons.filter(p => p.closed && p.points.length >= 3);
         return {
             annotations: closedPolys.map((p, idx) => {
-                // map name sang id từ DEFAULT_CATEGORY_LIST
                 const found = DEFAULT_CATEGORY_LIST.find(c => c.name === p.categoryName);
                 return {
                     id: idx + 1,
