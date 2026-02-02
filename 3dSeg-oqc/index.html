@@ -34,7 +34,7 @@
     #settingBtn { position: absolute; top: 10px; right: 10px; z-index: 3000; background: #444; color: #fff; border: 1px solid #666; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
 
     /* video view */
-    #videoView { position: absolute; width: 640px; height: 480px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content: center; overflow: hidden }
+    #videoView { position: absolute; width: 640px; height: 480px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content: center; }
     #videoView video { max-width: none; max-height: none; transform-origin: center center; }
     #videoView .resize-handle { position: absolute; width: 14px; height: 14px; right: 0; top: 0; background: #00aaff; cursor: nwse-resize; }
   </style>
@@ -239,28 +239,94 @@
           document.getElementById('filterOpts').style.display = (e.target.value === 'none') ? 'none' : 'block';
       };
 
+      // *** Keyboard events
       window.addEventListener('keydown', e => {
           if (activeRegion !== 'render3d') return;
-          if (e.key.toLowerCase() === 'p') poly.start();
-          if (e.key.toLowerCase() === 'e') selectionArmed = true;
-          if (e.key === 'Escape') poly.finish();
-          if (e.key === 'Delete') poly.deleteSelected();
-          if (e.key === 'ArrowUp') { e.preventDefault(); poly.cycleCategory(1); }
-          if (e.key === 'ArrowDown') { e.preventDefault(); poly.cycleCategory(-1); }
+          
+          // Nhấn P để bắt đầu vẽ polygon mới
+          if (e.key.toLowerCase() === 'p') {
+              poly.start();
+          }
+          
+          // Nhấn E để arm selection mode
+          if (e.key.toLowerCase() === 'e') {
+              selectionArmed = true;
+          }
+          
+          // Nhấn ESC để đóng polygon (finish)
+          if (e.key === 'Escape') {
+              if (poly.isDrawing) {
+                  poly.finish();
+              }
+          }
+          
+          // Delete để xóa polygon đang chọn
+          if (e.key === 'Delete') {
+              poly.deleteSelected();
+          }
+          
+          // Arrow keys để đổi category
+          if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              poly.cycleCategory(1);
+          }
+          if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              poly.cycleCategory(-1);
+          }
       });
 
+      // *** Mouse events - MOUSEMOVE với hover detection
+      render3d.addEventListener('mousemove', e => {
+          if (activeRegion !== 'render3d') return;
+          
+          // Update hover state và đổi cursor (khi không đang vẽ)
+          if (!poly.isDrawing) {
+              poly.updateHover(e, camera);
+          }
+          
+          // Vẽ preview edge khi đang drawing
+          if (poly.isDrawing) {
+              poly.updatePreview(e, camera);
+          }
+          
+          // Xử lý drag handle
+          poly.onDrag(e, camera);
+      });
+
+      // *** MOUSEDOWN - xử lý click
       render3d.addEventListener('mousedown', e => {
           setActiveRegion('render3d');
           if (activeRegion !== 'render3d') return;
+          
           if(e.button === 0) {
-              const hit = poly.handlePointerDown(e, camera, { allowSelect: selectionArmed || poly.isDrawing, allowDrag: !selectionArmed });
+              const hit = poly.handlePointerDown(e, camera, {
+                  allowSelect: selectionArmed || poly.isDrawing,
+                  allowDrag: !selectionArmed && !poly.isDrawing,
+                  allowAddPoint: !selectionArmed && !poly.isDrawing
+              });
               selectionArmed = false;
-              if (hit?.action === 'drag-start' || hit?.action === 'selected') return;
-              if(!poly.onDragStart || !poly.onDragStart(e, camera)) poly.addPoint(e, camera);
+              
+              // Nếu bắt đầu drag điểm, dừng lại
+              if (hit?.action === 'drag-start') return;
+              
+              // Nếu đã th��m điểm vào edge, dừng lại
+              if (hit?.action === 'point-added') return;
+              
+              // Nếu đã select polygon, dừng lại
+              if (hit?.action === 'selected') return;
+              
+              // Chỉ thêm điểm mới khi đang drawing
+              if (poly.isDrawing) {
+                  poly.addPoint(e, camera);
+              }
           }
       });
-      render3d.addEventListener('mousemove', e => { if (activeRegion === 'render3d') poly.onDrag(e, camera); });
-      render3d.addEventListener('mouseup', () => { if (activeRegion === 'render3d') poly.onDragEnd(); });
+
+      // *** MOUSEUP - kết thúc drag
+      render3d.addEventListener('mouseup', () => {
+          if (activeRegion === 'render3d') poly.onDragEnd();
+      });
 
       function apply() {
           if(!points) return;
