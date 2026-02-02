@@ -16,8 +16,8 @@ export class PolygonManager {
         this.current = null;
         this.isDrawing = false;
         this.raycaster = new THREE.Raycaster();
-        this.raycaster.params.Line = { threshold: 0.15 };
-        this.raycaster.params.Points = { threshold: 0.3 };
+        this.raycaster.params.Line = { threshold: 1 };
+        this.raycaster.params.Points = { threshold: 3 };
         this.selected = null;
         this.categoryList = [...DEFAULT_CATEGORY_LIST];
         this.flatten = false;
