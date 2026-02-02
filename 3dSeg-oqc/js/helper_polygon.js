@@ -75,7 +75,7 @@ export class PolygonManager {
                 linewidth: params.linewidth,
                 dashSize: params.dashSize || 0.2,
                 gapSize: params.gapSize || 0.1,
-                depthTest: false,
+                depthTest: true,
                 depthWrite: false,
                 transparent: true,
                 opacity: params.opacity || 0.7
@@ -84,8 +84,11 @@ export class PolygonManager {
         return new THREE.LineBasicMaterial({
             color: params.color,
             linewidth: params.linewidth,
-            depthTest: false,
+            depthTest: true,
             depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -1.0,
+            polygonOffsetUnits: -1.0,
             transparent: true
         });
     }
@@ -284,9 +287,12 @@ export class PolygonManager {
         const geo = new THREE.SphereGeometry(0.12, 16, 12);
         const mat = new THREE.MeshBasicMaterial({
             color: this.getCategoryColor(catName),
-            depthTest: false,
+            depthTest: true,
             depthWrite: false,
-            transparent: true
+            transparent: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -1.5,
+            polygonOffsetUnits: -1.5
         });
         const handle = new THREE.Mesh(geo, mat);
         handle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z ?? 0.1));
@@ -455,9 +461,12 @@ export class PolygonManager {
             const geo = new THREE.SphereGeometry(0.12, 16, 12);
             const mat = new THREE.MeshBasicMaterial({
                 color: this.getCategoryColor(catName),
-                depthTest: false,
+                depthTest: true,
                 depthWrite: false,
-                transparent: true
+                transparent: true,
+                polygonOffset: true,
+                polygonOffsetFactor: -1.5,
+                polygonOffsetUnits: -1.5
             });
             const handle = new THREE.Mesh(geo, mat);
             handle.position.set(newPoint.x, newPoint.y, this.flatten ? 0.1 : (newPoint.z ?? 0.1));
