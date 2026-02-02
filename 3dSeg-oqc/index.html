@@ -310,7 +310,7 @@
               // Nếu bắt đầu drag điểm, dừng lại
               if (hit?.action === 'drag-start') return;
               
-              // Nếu đã th��m điểm vào edge, dừng lại
+              // Nếu đã thêm điểm vào edge, dừng lại
               if (hit?.action === 'point-added') return;
               
               // Nếu đã select polygon, dừng lại
@@ -326,6 +326,22 @@
       // *** MOUSEUP - kết thúc drag
       render3d.addEventListener('mouseup', () => {
           if (activeRegion === 'render3d') poly.onDragEnd();
+      });
+
+      // *** CONTEXTMENU (chuột phải) - xóa điểm
+      render3d.addEventListener('contextmenu', e => {
+          e.preventDefault(); // Ngăn menu context mặc định
+          
+          if (activeRegion !== 'render3d') return;
+          
+          // Xử lý xóa điểm
+          const result = poly.handleRightClick(e, camera);
+          
+          if (result?.action === 'point-deleted') {
+              console.log(`Đã xóa điểm ${result.index} của polygon`);
+          } else if (result?.action === 'delete-failed') {
+              console.warn('Không thể xóa điểm (cần tối thiểu 3 điểm)');
+          }
       });
 
       function apply() {
