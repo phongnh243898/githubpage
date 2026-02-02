@@ -24,12 +24,79 @@ export class PolygonManager {
         this.draggedHandle = null;
         this.draggedPoly = null;
         
-        // Preview edge (nét đứt)
-        this.previewLine = null;
+        // Preview edges (nét đứt): 2 đoạn
+        this.previewLine1 = null; // điểm cuối → chuột
+        this.previewLine2 = null; // chuột → điểm đầu
         
         // Hover state
         this.hoveredHandle = null;
         this.hoveredEdge = null;
+        
+        // *** TIỀN CẤP PHÁT geometry pool để tránh lag
+        this.geometryPool = [];
+        this.materialPool = [];
+        this.maxPoolSize = 50;
+    }
+
+    // *** Geometry pooling để tránh cấp phát liên tục
+    getGeometry(points) {
+        let geo = this.geometryPool.pop();
+        if (geo) {
+            geo.setFromPoints(points);
+            geo.attributes.position.needsUpdate = true;
+        } else {
+            geo = new THREE.BufferGeometry().setFromPoints(points);
+        }
+        return geo;
+    }
+
+    releaseGeometry(geo) {
+        if (!geo) return;
+        if (this.geometryPool.length < this.maxPoolSize) {
+            this.geometryPool.push(geo);
+        } else {
+            geo.dispose();
+        }
+    }
+
+    getMaterial(params) {
+        const mat = this.materialPool.find(m => 
+            m.color.getHex() === params.color.getHex() &&
+            m.linewidth === params.linewidth &&
+            m.type === params.type
+        );
+        if (mat) {
+            this.materialPool.splice(this.materialPool.indexOf(mat), 1);
+            return mat;
+        }
+        if (params.type === 'dashed') {
+            return new THREE.LineDashedMaterial({
+                color: params.color,
+                linewidth: params.linewidth,
+                dashSize: params.dashSize || 0.2,
+                gapSize: params.gapSize || 0.1,
+                depthTest: false,
+                depthWrite: false,
+                transparent: true,
+                opacity: params.opacity || 0.7
+            });
+        }
+        return new THREE.LineBasicMaterial({
+            color: params.color,
+            linewidth: params.linewidth,
+            depthTest: false,
+            depthWrite: false,
+            transparent: true
+        });
+    }
+
+    releaseMaterial(mat) {
+        if (!mat) return;
+        if (this.materialPool.length < this.maxPoolSize) {
+            this.materialPool.push(mat);
+        } else {
+            mat.dispose();
+        }
     }
 
     // --- Category handling ---
@@ -93,7 +160,7 @@ export class PolygonManager {
         }
         this.current.closed = true;
         this.redraw(this.current, true);
-        this.removePreviewLine();
+        this.removePreviewLines();
         this.isDrawing = false;
         this.updateHandleVisibility();
     }
@@ -107,67 +174,108 @@ export class PolygonManager {
             this.scene.remove(h);
         });
         if (this.current.line) {
-            if (this.current.line.geometry) this.current.line.geometry.dispose();
-            if (this.current.line.material) this.current.line.material.dispose();
+            this.releaseGeometry(this.current.line.geometry);
+            this.releaseMaterial(this.current.line.material);
             this.scene.remove(this.current.line);
         }
         const idx = this.polygons.indexOf(this.current);
         if (idx !== -1) this.polygons.splice(idx, 1);
         this.current = null;
         this.isDrawing = false;
-        this.removePreviewLine();
+        this.removePreviewLines();
     }
 
-    // Update preview line khi di chuột
+    // *** Update preview lines - 2 đoạn (điểm cuối → chuột → điểm đầu)
     updatePreview(event, camera) {
         if (!this.isDrawing || !this.current || this.current.points.length === 0) {
-            this.removePreviewLine();
+            this.removePreviewLines();
             return;
         }
 
         const pos = this.getMousePos(event, camera);
         if (!pos) {
-            this.removePreviewLine();
+            this.removePreviewLines();
             return;
         }
 
+        const catName = this.current.categoryName || this.defaultCategoryName;
+        const color = new THREE.Color(this.getCategoryColor(catName));
+
+        // Đoạn 1: điểm cuối → chuột
         const lastPoint = this.current.points[this.current.points.length - 1];
-        const pts = this.flatten
+        const pts1 = this.flatten
             ? [new THREE.Vector3(lastPoint.x, lastPoint.y, 0), new THREE.Vector3(pos.x, pos.y, 0)]
             : [lastPoint, pos];
 
-        // Dispose geometry cũ
-        if (this.previewLine) {
-            if (this.previewLine.geometry) this.previewLine.geometry.dispose();
-            if (this.previewLine.material) this.previewLine.material.dispose();
-            this.scene.remove(this.previewLine);
+        if (this.previewLine1) {
+            this.releaseGeometry(this.previewLine1.geometry);
+            this.releaseMaterial(this.previewLine1.material);
+            this.scene.remove(this.previewLine1);
         }
 
-        const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        const catName = this.current.categoryName || this.defaultCategoryName;
-        const color = this.getCategoryColor(catName);
-        const mat = new THREE.LineDashedMaterial({
+        const geo1 = this.getGeometry(pts1);
+        const mat1 = this.getMaterial({
             color,
             linewidth: 2,
+            type: 'dashed',
             dashSize: 0.2,
             gapSize: 0.1,
-            depthTest: false,
-            depthWrite: false,
-            transparent: true,
             opacity: 0.7
         });
-        this.previewLine = new THREE.Line(geo, mat);
-        this.previewLine.computeLineDistances();
-        this.previewLine.renderOrder = 2002;
-        this.scene.add(this.previewLine);
+        this.previewLine1 = new THREE.Line(geo1, mat1);
+        this.previewLine1.computeLineDistances();
+        this.previewLine1.renderOrder = 2002;
+        this.scene.add(this.previewLine1);
+
+        // *** Đoạn 2: chuột → điểm đầu (chỉ vẽ khi có >= 2 điểm)
+        if (this.current.points.length >= 2) {
+            const firstPoint = this.current.points[0];
+            const pts2 = this.flatten
+                ? [new THREE.Vector3(pos.x, pos.y, 0), new THREE.Vector3(firstPoint.x, firstPoint.y, 0)]
+                : [pos, firstPoint];
+
+            if (this.previewLine2) {
+                this.releaseGeometry(this.previewLine2.geometry);
+                this.releaseMaterial(this.previewLine2.material);
+                this.scene.remove(this.previewLine2);
+            }
+
+            const geo2 = this.getGeometry(pts2);
+            const mat2 = this.getMaterial({
+                color,
+                linewidth: 2,
+                type: 'dashed',
+                dashSize: 0.2,
+                gapSize: 0.1,
+                opacity: 0.7
+            });
+            this.previewLine2 = new THREE.Line(geo2, mat2);
+            this.previewLine2.computeLineDistances();
+            this.previewLine2.renderOrder = 2002;
+            this.scene.add(this.previewLine2);
+        } else {
+            // Nếu chỉ có 1 điểm thì xóa line2
+            if (this.previewLine2) {
+                this.releaseGeometry(this.previewLine2.geometry);
+                this.releaseMaterial(this.previewLine2.material);
+                this.scene.remove(this.previewLine2);
+                this.previewLine2 = null;
+            }
+        }
     }
 
-    removePreviewLine() {
-        if (this.previewLine) {
-            if (this.previewLine.geometry) this.previewLine.geometry.dispose();
-            if (this.previewLine.material) this.previewLine.material.dispose();
-            this.scene.remove(this.previewLine);
-            this.previewLine = null;
+    removePreviewLines() {
+        if (this.previewLine1) {
+            this.releaseGeometry(this.previewLine1.geometry);
+            this.releaseMaterial(this.previewLine1.material);
+            this.scene.remove(this.previewLine1);
+            this.previewLine1 = null;
+        }
+        if (this.previewLine2) {
+            this.releaseGeometry(this.previewLine2.geometry);
+            this.releaseMaterial(this.previewLine2.material);
+            this.scene.remove(this.previewLine2);
+            this.previewLine2 = null;
         }
     }
 
@@ -219,7 +327,7 @@ export class PolygonManager {
     getAllHandles() { return this.polygons.flatMap(p => p.handles); }
     getAllLines() { return this.polygons.map(p => p.line).filter(Boolean); }
 
-    // *** THÊM: Hover detection với cursor change
+    // Hover detection với cursor change
     updateHover(event, camera) {
         const rect = this.renderer.domElement.getBoundingClientRect();
         const mouse = new THREE.Vector2(
@@ -238,7 +346,7 @@ export class PolygonManager {
             return null;
         }
 
-        // 1. Ưu tiên kiểm tra handle (điểm) trước
+        // 1. Ưu tiên kiểm tra handle (điểm) trước - threshold 0.3
         const handleHits = this.raycaster.intersectObjects(this.selected.handles, false);
         if (handleHits.length > 0) {
             this.hoveredHandle = handleHits[0].object;
@@ -246,7 +354,7 @@ export class PolygonManager {
             return { type: 'handle', object: this.hoveredHandle };
         }
 
-        // 2. Kiểm tra edge (cạnh)
+        // 2. Kiểm tra edge (cạnh) - threshold 0.15
         if (this.selected.line && this.selected.closed) {
             const lineHits = this.raycaster.intersectObject(this.selected.line, false);
             if (lineHits.length > 0) {
@@ -309,7 +417,7 @@ export class PolygonManager {
         return null;
     }
 
-    // *** THÊM: Thêm điểm vào giữa cạnh
+    // Thêm điểm vào giữa cạnh
     addPointOnEdge(hit) {
         if (!this.selected || !this.selected.closed) return;
 
@@ -376,14 +484,57 @@ export class PolygonManager {
 
     onDragEnd() { this.draggedHandle = null; this.draggedPoly = null; }
 
-    // Dispose geometry cũ trước khi tạo mới
+    // *** THÊM: Xóa điểm khi click chuột phải
+    handleRightClick(event, camera) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const mouse = new THREE.Vector2(
+            ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            -((event.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        this.raycaster.setFromCamera(mouse, camera);
+
+        // Kiểm tra click vào handle
+        const handleHits = this.raycaster.intersectObjects(this.getAllHandles(), false);
+        if (handleHits.length > 0) {
+            const handle = handleHits[0].object;
+            const poly = this.polygons.find(p => p.handles.includes(handle));
+            
+            if (poly) {
+                const index = poly.handles.indexOf(handle);
+                
+                // Không cho xóa nếu polygon có ít hơn 4 điểm (sau khi xóa còn < 3)
+                if (poly.points.length <= 3) {
+                    console.warn('Không thể xóa điểm! Polygon cần ít nhất 3 điểm.');
+                    return { action: 'delete-failed', reason: 'min-points' };
+                }
+                
+                // Xóa điểm và handle
+                poly.points.splice(index, 1);
+                
+                // Dispose và remove handle
+                if (handle.geometry) handle.geometry.dispose();
+                if (handle.material) handle.material.dispose();
+                this.scene.remove(handle);
+                poly.handles.splice(index, 1);
+                
+                // Redraw polygon
+                this.redraw(poly, poly.closed);
+                
+                return { action: 'point-deleted', poly, index };
+            }
+        }
+        
+        return null;
+    }
+
+    // *** Dùng pooling để tránh cấp phát liên tục
     redraw(poly, closed = false) {
         this.updateHandleStyles(poly);
         
-        // Dispose old resources
+        // Release old resources
         if (poly.line) {
-            if (poly.line.geometry) poly.line.geometry.dispose();
-            if (poly.line.material) poly.line.material.dispose();
+            this.releaseGeometry(poly.line.geometry);
+            this.releaseMaterial(poly.line.material);
             this.scene.remove(poly.line);
             poly.line = null;
         }
@@ -394,17 +545,15 @@ export class PolygonManager {
             ? poly.points.map(p => new THREE.Vector3(p.x, p.y, 0))
             : poly.points;
 
-        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const geo = this.getGeometry(pts);
 
         const catName = poly.categoryName || this.defaultCategoryName;
-        const color = this.getCategoryColor(catName);
+        const color = new THREE.Color(this.getCategoryColor(catName));
         const isSelected = this.selected === poly;
-        const mat = new THREE.LineBasicMaterial({
+        const mat = this.getMaterial({
             color,
             linewidth: isSelected ? 10 : 5,
-            depthTest: false,
-            depthWrite: false,
-            transparent: true
+            type: 'basic'
         });
         poly.line = closed ? new THREE.LineLoop(geo, mat) : new THREE.Line(geo, mat);
         poly.line.renderOrder = isSelected ? 2001 : 1999;
@@ -442,8 +591,8 @@ export class PolygonManager {
         
         // Remove line
         if (this.selected.line) {
-            if (this.selected.line.geometry) this.selected.line.geometry.dispose();
-            if (this.selected.line.material) this.selected.line.material.dispose();
+            this.releaseGeometry(this.selected.line.geometry);
+            this.releaseMaterial(this.selected.line.material);
             this.scene.remove(this.selected.line);
         }
         
@@ -462,12 +611,12 @@ export class PolygonManager {
                 this.scene.remove(h);
             });
             if (p.line) {
-                if (p.line.geometry) p.line.geometry.dispose();
-                if (p.line.material) p.line.material.dispose();
+                this.releaseGeometry(p.line.geometry);
+                this.releaseMaterial(p.line.material);
                 this.scene.remove(p.line);
             }
         });
-        this.removePreviewLine();
+        this.removePreviewLines();
         this.polygons = [];
         this.current = null;
         this.isDrawing = false;
