@@ -19,6 +19,10 @@ export class PolygonManager {
 		this.activePolygon = null;
 		this.state = 'idle'; // idle, create, edit
 
+		// Lưu reference đến pcdMesh và tên file
+		this.pcdMesh = null;
+		this.pcdName = null;
+
 		this.config = {
 			sizeVertex: 0.5,
 			thicknessLine: 3,
@@ -37,6 +41,12 @@ export class PolygonManager {
 		this._dragVertexIdx = -1;
 
 		this._initEvent();
+	}
+
+	// Set PCD mesh reference
+	setPcdMesh(pcdMesh, pcdName) {
+		this.pcdMesh = pcdMesh;
+		this.pcdName = pcdName;
 	}
 
 	_initEvent() {
@@ -131,23 +141,33 @@ export class PolygonManager {
 	// ========== TÍCH HỢP VỚI POLYGONIO ==========
 
 	importData(data) {
-		// Gọi hàm parse từ file IO của bạn
-		// Truyền vào callback allocateVertex để lấy index từ Pool của Manager
 		const importedPolygons = PolygonIO.parse(data, () => this.polygonRenderer.allocateVertex());
 
 		importedPolygons.forEach(poly => {
 			this._rebuildEdges(poly);
 			this.polygons.push(poly);
-			// Cập nhật auto_id để tránh trùng lặp
 			if (poly.id >= this.auto_id) this.auto_id = poly.id + 1;
 		});
 
 		this.update3d();
 	}
 
-	exportData(filename) {
-		// Gọi hàm từ file IO của bạn
-		const content = PolygonIO.stringify(this.polygons);
+	exportData(resolution = 0.1, padding = 10) {
+		// Tạo nội dung JSON với images và annotations
+		const content = PolygonIO.stringify(
+			this.polygons, 
+			this.pcdMesh, 
+			this.pcdName, 
+			resolution, 
+			padding
+		);
+		
+		// Tên file xuất ra: thay .pcd thành .json
+		let filename = 'polygons.json';
+		if (this.pcdName) {
+			filename = this.pcdName.replace(/\.pcd$/i, '.json');
+		}
+		
 		PolygonIO.download(content, filename);
 	}
 
