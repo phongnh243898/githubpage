@@ -13,19 +13,18 @@ export const polygon_map_file = [
 ];
 
 export class PolygonIO {
-    // Tính toán bounding box và grid dimensions từ pcdMesh
-    static calculateGridParams(pcdMesh, resolution = 0.1, padding = 10) {
-        if (!pcdMesh || !pcdMesh.geometry) {
+    // Tính toán thông số grid từ pcdMesh - FIX resolution=0.1, padding=10
+    static calculateGridParams(pcdMesh) {
+        const resolution = 0.1;
+        const padding = 10;
+        
+        if (!pcdMesh || !pcdMesh.geometry || !pcdMesh.geometry.attributes.position) {
             console.error("Invalid pcdMesh");
             return null;
         }
 
         const positions = pcdMesh.geometry.attributes.position;
-        if (!positions) {
-            console.error("No position attribute in geometry");
-            return null;
-        }
-
+        
         // Tìm min/max của x, y
         let min_x = Infinity, max_x = -Infinity;
         let min_y = Infinity, max_y = -Infinity;
@@ -45,20 +44,14 @@ export class PolygonIO {
         const y_range = [min_y - padding, max_y + padding];
 
         // Tính width và height
-        const width = (x_range[1] - x_range[0]) / resolution;
-        const height = (y_range[1] - y_range[0]) / resolution;
+        const width = Math.ceil((x_range[1] - x_range[0]) / resolution);
+        const height = Math.ceil((y_range[1] - y_range[0]) / resolution);
 
         return {
-            min_x,
-            max_x,
-            min_y,
-            max_y,
             x_range,
             y_range,
-            width: Math.ceil(width),
-            height: Math.ceil(height),
-            resolution,
-            padding
+            width,
+            height
         };
     }
 
@@ -75,7 +68,6 @@ export class PolygonIO {
 
             ann.location.forEach(loc => {
                 poly.positions.push(new THREE.Vector3(loc.x, loc.y, loc.z || 0));
-                // Gọi callback để Manager cấp phát Index từ Pool
                 const vIdx = allocateVertexCallback();
                 if (vIdx !== -1) poly.vertexIndices.push(vIdx);
             });
@@ -85,15 +77,34 @@ export class PolygonIO {
         });
     }
 
-    // Chuyển danh sách Polygon hiện tại thành file JSON để tải về
-    static stringify(polygons) {
-        return JSON.stringify({
+    // Chuyển danh sách Polygon thành file JSON với images
+    static stringify(polygons, pcdMesh = null, pcdName = null) {
+        const result = {
+            images: [],
             annotations: polygons.map(p => ({
                 id: p.id,
                 category: p.name || "undriver",
                 location: p.positions.map(pos => ({ x: pos.x, y: pos.y, z: pos.z }))
             }))
-        }, null, 2);
+        };
+        
+        // Thêm thông tin images nếu có pcdMesh
+        if (pcdMesh && pcdName) {
+            const gridParams = PolygonIO.calculateGridParams(pcdMesh);
+            
+            if (gridParams) {
+                result.images.push({
+                    id: 1,
+                    file_name: pcdName,
+                    x_range: gridParams.x_range,
+                    y_range: gridParams.y_range,
+                    width: gridParams.width,
+                    height: gridParams.height
+                });
+            }
+        }
+        
+        return JSON.stringify(result, null, 2);
     }
 
     static download(content, filename) {
