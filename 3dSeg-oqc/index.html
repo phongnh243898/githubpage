@@ -52,7 +52,7 @@
       <input type="file" id="videoFile" accept="video/*" />
 
       <h3>Shader Settings</h3>
-      <label>Point Size (1-2)</label>
+      <label>Point Size (0.5-5)</label>
       <input type="range" id="size" min="0.5" max="5" step="0.1" value="1">
 
       <div class="group">
@@ -101,6 +101,17 @@
         </div>
       </div>
 
+      <h3>Polygon Settings</h3>
+      <div class="group">
+        <label>Vertex Size (0.1-2)</label>
+        <input type="range" id="vertexSize" min="0.1" max="2" step="0.1" value="0.5">
+        
+        <label>Line Thickness (1-10)</label>
+        <input type="range" id="lineThickness" min="1" max="10" step="0.5" value="3">
+        
+        <button id="applyPolygonConfig" style="background:#ff6600">Apply Polygon Config</button>
+      </div>
+
       <label class="inline-check"><input type="checkbox" id="oxy"> Project to OXY (2D)</label>
       <button id="apply" style="background:#007bff">APPLY ALL</button>
       <button id="export" style="background:#28a745">EXPORT POLYGONS</button>
@@ -112,6 +123,7 @@
     "imports": { 
       "three": "https://unpkg.com/three@0.161.0/build/three.module.js", 
       "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
+      "three/examples/jsm/": "https://unpkg.com/three@0.161.0/examples/jsm/",
       "./js":"./js"
     } 
   } </script>
@@ -123,15 +135,9 @@
       const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
       const { MapControls } = await import('three/addons/controls/MapControls.js');
       const { updatePCDShader } = await import('./js/helper_shader_pcd.js');
-      const { PolygonManager } = await import('./js/helper_polygon.js');
+      const { PolygonManager } = await import('./js/PolygonManager.js');
+      const { PolygonIO, polygon_map_file } = await import('./js/PolygonIO.js');
       const { VideoManager } = await import('./js/helper_video.js');
-
-      const CATEGORY_LIST = [
-        { id: 205340, name: 'undrivable', color: '#ff0000' },
-        { id: 205341, name: 'things',      color: '#ffff00' },
-        { id: 205342, name: 'construction',color: '#800080' },
-        { id: 205343, name: 'uneven',      color: '#ffffff' },
-      ];
 
       const render3d = document.getElementById('render3d');
       if (!render3d) { console.error('Element #render3d not found'); return; }
@@ -159,15 +165,22 @@
       });
       scene.add(axes);
 
+      // Polygon group
+      const polygonGroup = new THREE.Group();
+      polygonGroup.name = 'PolygonGroup';
+      scene.add(polygonGroup);
+
       let camera = persCam, controls = new OrbitControls(camera, renderer.domElement), points = null;
-      const poly = new PolygonManager(scene, renderer);
-      poly.setCategories(CATEGORY_LIST);
+      
+      // Khởi tạo PolygonManager với các thư viện mới
+      const polyManager = new PolygonManager(render3d, renderer, camera, polygonGroup);
+      
       const videoMgr = new VideoManager(document.querySelector("#viewWrap"));
 
       let activeRegion = 'render3d';
       let isRendering = false;
       let currentPcdName = null;
-      let selectionArmed = false;
+      let currentCategoryIdx = 0;
 
       const basename = (p = '') => p.split(/[\\/]/).pop() || '';
       const isPcdNameMatch = (jsonName, loadedName) => {
@@ -177,13 +190,17 @@
 
       function setActiveRegion(region) {
           activeRegion = region;
-          if (region === 'render3d') startRender(); else stopRender();
+          if (region === 'render3d') {
+              render3d.focus();
+              startRender();
+          } else {
+              stopRender();
+          }
       }
 
       function resizeRenderer() {
           const { clientWidth, clientHeight } = render3d;
           renderer.setSize(clientWidth, clientHeight);
-          poly.updateResolution(clientWidth, clientHeight);
           if (camera.isPerspectiveCamera) camera.aspect = clientWidth / clientHeight;
           if (camera.isOrthographicCamera) {
               const aspect = clientWidth / clientHeight;
@@ -224,6 +241,9 @@
               controls = new OrbitControls(camera, renderer.domElement);
               controls.target.copy(target);
           }
+          
+          // Update camera reference in PolygonManager
+          polyManager.camera = camera;
           controls.update();
           resizeRenderer();
       }
@@ -240,108 +260,77 @@
           document.getElementById('filterOpts').style.display = (e.target.value === 'none') ? 'none' : 'block';
       };
 
+      // *** Apply polygon config
+      document.getElementById('applyPolygonConfig').onclick = () => {
+          const vertexSize = parseFloat(document.getElementById('vertexSize').value);
+          const lineThickness = parseFloat(document.getElementById('lineThickness').value);
+          
+          polyManager.setConfig({
+              sizeVertex: vertexSize,
+              thicknessLine: lineThickness
+          });
+      };
+
       // *** Keyboard events
       window.addEventListener('keydown', e => {
           if (activeRegion !== 'render3d') return;
           
-          // Nhấn P để bắt đầu vẽ polygon mới
+          // Nhấn E để bắt đầu vẽ polygon mới
           if (e.key.toLowerCase() === 'e') {
-              poly.start();
+              e.preventDefault();
+              polyManager.startPolygon();
+              // Set category mặc định
+              if (polyManager.activePolygon) {
+                  const category = polygon_map_file[currentCategoryIdx];
+                  polyManager.activePolygon.name = category.name;
+                  polyManager.activePolygon.color = parseInt(category.color);
+              }
           }
           
-          // Nhấn E để arm selection mode
+          // Nhấn P để chuyển sang edit mode (select polygon)
           if (e.key.toLowerCase() === 'p') {
-              selectionArmed = true;
+              e.preventDefault();
+              polyManager.state = 'edit';
           }
           
           // Nhấn ESC để đóng polygon (finish)
           if (e.key === 'Escape') {
-              if (poly.isDrawing) {
-                  poly.finish();
+              e.preventDefault();
+              if (polyManager.activePolygon && !polyManager.activePolygon.isClose) {
+                  polyManager.closePolygon();
               }
           }
           
           // Delete để xóa polygon đang chọn
           if (e.key === 'Delete') {
-              poly.deleteSelected();
+              e.preventDefault();
+              polyManager.deletePolygon();
           }
           
-          // Arrow keys để đổi category
+          // Arrow Up/Down để đổi category
           if (e.key === 'ArrowUp') {
               e.preventDefault();
-              poly.cycleCategory(1);
+              currentCategoryIdx = (currentCategoryIdx + 1) % polygon_map_file.length;
+              if (polyManager.activePolygon) {
+                  const category = polygon_map_file[currentCategoryIdx];
+                  polyManager.setAttributes({
+                      color: parseInt(category.color)
+                  });
+                  polyManager.activePolygon.name = category.name;
+                  console.log(`Category changed to: ${category.name}`);
+              }
           }
           if (e.key === 'ArrowDown') {
               e.preventDefault();
-              poly.cycleCategory(-1);
-          }
-      });
-
-      // *** Mouse events - MOUSEMOVE với hover detection
-      render3d.addEventListener('mousemove', e => {
-          if (activeRegion !== 'render3d') return;
-          
-          // Update hover state và đổi cursor (khi không đang vẽ)
-          if (!poly.isDrawing) {
-              poly.updateHover(e, camera);
-          }
-          
-          // Vẽ preview edge khi đang drawing
-          if (poly.isDrawing) {
-              poly.updatePreview(e, camera);
-          }
-          
-          // Xử lý drag handle
-          poly.onDrag(e, camera);
-      });
-
-      // *** MOUSEDOWN - xử lý click
-      render3d.addEventListener('mousedown', e => {
-          setActiveRegion('render3d');
-          if (activeRegion !== 'render3d') return;
-          
-          if(e.button === 0) {
-              const hit = poly.handlePointerDown(e, camera, {
-                  allowSelect: selectionArmed || poly.isDrawing,
-                  allowDrag: !selectionArmed && !poly.isDrawing,
-                  allowAddPoint: !selectionArmed && !poly.isDrawing
-              });
-              selectionArmed = false;
-              
-              // Nếu bắt đầu drag điểm, dừng lại
-              if (hit?.action === 'drag-start') return;
-              
-              // Nếu đã thêm điểm vào edge, dừng lại
-              if (hit?.action === 'point-added') return;
-              
-              // Nếu đã select polygon, dừng lại
-              if (hit?.action === 'selected') return;
-              
-              // Chỉ thêm điểm mới khi đang drawing
-              if (poly.isDrawing) {
-                  poly.addPoint(e, camera);
+              currentCategoryIdx = (currentCategoryIdx - 1 + polygon_map_file.length) % polygon_map_file.length;
+              if (polyManager.activePolygon) {
+                  const category = polygon_map_file[currentCategoryIdx];
+                  polyManager.setAttributes({
+                      color: parseInt(category.color)
+                  });
+                  polyManager.activePolygon.name = category.name;
+                  console.log(`Category changed to: ${category.name}`);
               }
-          }
-      });
-
-      // *** MOUSEUP - kết thúc drag
-      render3d.addEventListener('mouseup', () => {
-          if (activeRegion === 'render3d') poly.onDragEnd();
-      });
-
-      // *** CONTEXTMENU (chuột phải) - xóa điểm
-      render3d.addEventListener('contextmenu', e => {
-          e.preventDefault(); // Ngăn menu context mặc định
-          
-          if (activeRegion !== 'render3d') return;
-          
-          // Xử lý xóa điểm
-          const result = poly.handleRightClick(e, camera);
-          
-          if (result?.action === 'point-deleted') {
-              console.log(`Đã xóa điểm ${result.index} của polygon`);
-          } else if (result?.action === 'delete-failed') {
-              console.warn('Không thể xóa điểm (cần tối thiểu 3 điểm)');
           }
       });
 
@@ -349,7 +338,6 @@
           if(!points) return;
           const is2D = document.getElementById('oxy').checked;
           setupControls(is2D);
-          poly.setFlatten(is2D);
           const fType = document.getElementById('fType').value;
           const colorMode = document.getElementById('colorMode').value;
           updatePCDShader(THREE, points, {
@@ -384,13 +372,7 @@
           reader.onload = () => {
               try {
                   const data = JSON.parse(reader.result);
-                  if (Array.isArray(data.categories)) poly.setCategories(data.categories);
-                  const imageId = pickImageIdForJson(data);
-                  const anns = Array.isArray(data.annotations) ? data.annotations : [];
-                  const filtered = imageId == null
-                    ? anns.filter(a => a.shape === 'polygon' && a.type === '3D')
-                    : anns.filter(a => a.image_id === imageId && a.shape === 'polygon' && a.type === '3D');
-                  poly.loadFromAnnotations(filtered);
+                  polyManager.importData(data);
               } catch (err) {
                   console.error('Invalid JSON', err);
               }
@@ -425,15 +407,8 @@
       document.getElementById('apply').onclick = apply;
 
       document.getElementById('export').onclick = () => {
-          const data = poly.getAnnotations();
-          data.categories = CATEGORY_LIST.map(c => ({ id: c.id, name: c.name }));
-          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'polygons.json';
-          a.click();
-          URL.revokeObjectURL(url);
+          const filename = 'polygons_' + new Date().toISOString().slice(0,10) + '.json';
+          polyManager.exportData(filename);
       };
 
       const sidebar = document.getElementById('sidebarRight');
@@ -459,6 +434,7 @@
       function stopRender() { isRendering = false; }
 
       resizeRenderer();
+      setActiveRegion('render3d');
       startRender();
     });
   </script>
