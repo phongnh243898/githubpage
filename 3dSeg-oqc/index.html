@@ -136,7 +136,7 @@
       const { MapControls } = await import('three/addons/controls/MapControls.js');
       const { updatePCDShader } = await import('./js/helper_shader_pcd.js');
       const { PolygonManager } = await import('./js/PolygonManager.js');
-      const { PolygonIO, polygon_map_file } = await import('./js/PolygonIO.js');
+      const { polygon_map_file } = await import('./js/PolygonIO.js');
       const { VideoManager } = await import('./js/helper_video.js');
 
       const render3d = document.getElementById('render3d');
@@ -179,14 +179,9 @@
 
       let activeRegion = 'render3d';
       let isRendering = false;
-      let currentPcdName = null;
       let currentCategoryIdx = 0;
 
       const basename = (p = '') => p.split(/[\\/]/).pop() || '';
-      const isPcdNameMatch = (jsonName, loadedName) => {
-        if (!jsonName || !loadedName) return false;
-        return basename(jsonName).toLowerCase() === basename(loadedName).toLowerCase();
-      };
 
       function setActiveRegion(region) {
           activeRegion = region;
@@ -355,18 +350,6 @@
           });
       }
 
-      function pickImageIdForJson(data) {
-          const images = Array.isArray(data.images) ? data.images : [];
-          const pcdImages = images.filter(img => typeof img.file_name === 'string' && img.file_name.toLowerCase().endsWith('.pcd'));
-          if (!pcdImages.length) return null;
-
-          if (currentPcdName) {
-              const match = pcdImages.find(img => isPcdNameMatch(img.file_name, currentPcdName));
-              if (match) return match.id;
-          }
-          return pcdImages[0].id;
-      }
-
       function loadJsonPolygons(file) {
           const reader = new FileReader();
           reader.onload = () => {
@@ -389,10 +372,16 @@
               return;
           }
           if (ext === 'pcd') {
-              currentPcdName = basename(file.name);
+              const pcdFileName = file.name;
               new PCDLoader().load(URL.createObjectURL(file), p => {
                   if(points) scene.remove(points);
-                  points = p; scene.add(points); apply();
+                  points = p; 
+                  scene.add(points); 
+                  apply();
+                  
+                  // Truyền pcdMesh và tên file vào PolygonManager
+                  polyManager.setPcdMesh(points, pcdFileName);
+                  console.log('PCD loaded:', pcdFileName);
               });
           }
       };
@@ -406,9 +395,9 @@
 
       document.getElementById('apply').onclick = apply;
 
+      // Export - resolution=0.1 và padding=10 đã fix trong PolygonIO
       document.getElementById('export').onclick = () => {
-          const filename = 'polygons_' + new Date().toISOString().slice(0,10) + '.json';
-          polyManager.exportData(filename);
+          polyManager.exportData();
       };
 
       const sidebar = document.getElementById('sidebarRight');
