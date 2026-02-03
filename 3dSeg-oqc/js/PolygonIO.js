@@ -13,6 +13,55 @@ export const polygon_map_file = [
 ];
 
 export class PolygonIO {
+    // Tính toán bounding box và grid dimensions từ pcdMesh
+    static calculateGridParams(pcdMesh, resolution = 0.1, padding = 10) {
+        if (!pcdMesh || !pcdMesh.geometry) {
+            console.error("Invalid pcdMesh");
+            return null;
+        }
+
+        const positions = pcdMesh.geometry.attributes.position;
+        if (!positions) {
+            console.error("No position attribute in geometry");
+            return null;
+        }
+
+        // Tìm min/max của x, y
+        let min_x = Infinity, max_x = -Infinity;
+        let min_y = Infinity, max_y = -Infinity;
+
+        for (let i = 0; i < positions.count; i++) {
+            const x = positions.getX(i);
+            const y = positions.getY(i);
+            
+            if (x < min_x) min_x = x;
+            if (x > max_x) max_x = x;
+            if (y < min_y) min_y = y;
+            if (y > max_y) max_y = y;
+        }
+
+        // Thêm padding
+        const x_range = [min_x - padding, max_x + padding];
+        const y_range = [min_y - padding, max_y + padding];
+
+        // Tính width và height
+        const width = (x_range[1] - x_range[0]) / resolution;
+        const height = (y_range[1] - y_range[0]) / resolution;
+
+        return {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            x_range,
+            y_range,
+            width: Math.ceil(width),
+            height: Math.ceil(height),
+            resolution,
+            padding
+        };
+    }
+
     // Chuyển JSON thành danh sách các Object Polygon
     static parse(data, allocateVertexCallback) {
         if (!data || !data.annotations) return [];
