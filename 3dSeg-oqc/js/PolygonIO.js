@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { Polygon } from './Polygon.js';
 
 export const polygon_map_file = [
-    {"name": "undriver", "color": "0xff0000"},
+    {"name": "undrivable", "color": "0xff0000"},
     {"name": "things", "color": "0xffff00"},
     {"name": "construction", "color": "0x800080"},
     {"name": "uneven", "color": "0xffffff"}
@@ -117,3 +117,4 @@ export class PolygonIO {
         URL.revokeObjectURL(url);
     }
 }
+
