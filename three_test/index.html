@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PCD 4-View Viewer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; color: white; font-family: sans-serif; }
+        #container { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            grid-template-rows: 1fr 1fr; 
+            width: 100vw; height: 100vh; 
+        }
+        .viewport { position: relative; outline: none; border: 0.5px solid #333; }
+        .viewport:focus { border: 1px solid #0078d7; box-sizing: border-box; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; }
+        .label { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); padding: 2px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <strong>PCD 4-View Full Control</strong><br>
+        <input type="file" id="pcd-upload" accept=".pcd"><br>
+        <small>L-Click: Orbit/Pan | Shift+L: Roll | R-Click: Pan</small>
+    </div>
+    
+    <div id="container">
+        <div id="view-persp" class="viewport" tabindex="0"><div class="label">PERSPECTIVE</div></div>
+        <div id="view-top" class="viewport" tabindex="1"><div class="label">TOP (Y+)</div></div>
+        <div id="view-front" class="viewport" tabindex="2"><div class="label">FRONT (Z+)</div></div>
+        <div id="view-left" class="viewport" tabindex="3"><div class="label">LEFT (X-)</div></div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
