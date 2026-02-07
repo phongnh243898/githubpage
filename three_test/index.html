@@ -5,30 +5,153 @@
     <title>PCD 4-View Viewer</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; color: white; font-family: sans-serif; }
-        #container { 
-            display: grid; 
-            grid-template-columns: 1fr 1fr; 
-            grid-template-rows: 1fr 1fr; 
-            width: 100vw; height: 100vh; 
+        
+        #main-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
         }
-        .viewport { position: relative; outline: none; border: 0.5px solid #333; }
-        .viewport:focus { border: 1px solid #0078d7; box-sizing: border-box; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; border: 1px solid #444; }
-        .label { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); padding: 2px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; }
+        
+        /* Cột chính - Camera chính */
+        #main-view {
+            flex: 2;
+            position: relative;
+            border-right: 2px solid #333;
+        }
+        
+        /* Cột phụ - 3 camera nhỏ */
+        #side-views {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .viewport {
+            position: relative;
+            outline: none;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .side-viewport {
+            flex: 1;
+            position: relative;
+            border-bottom: 1px solid #333;
+        }
+        
+        .side-viewport:last-child {
+            border-bottom: none;
+        }
+        
+        .viewport:focus {
+            outline: 2px solid #0078d7;
+        }
+        
+        /* Label cho từng view */
+        .label {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        
+        /* Nút chuyển đổi camera */
+        .switch-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            background: rgba(0, 120, 215, 0.8);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+            z-index: 10;
+        }
+        
+        .switch-btn:hover {
+            background: rgba(0, 120, 215, 1);
+        }
+        
+        .switch-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: white;
+        }
+        
+        /* UI Panel */
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+        }
+        
+        #ui input[type="file"] {
+            margin: 8px 0;
+        }
+        
+        #ui small {
+            color: #aaa;
+        }
     </style>
 </head>
 <body>
     <div id="ui">
-        <strong>PCD 4-View Full Control</strong><br>
+        <strong>PCD 4-View Viewer</strong><br>
         <input type="file" id="pcd-upload" accept=".pcd"><br>
-        <small>L-Click: Orbit/Pan | Shift+L: Roll | R-Click: Pan</small>
+        <small>Main: Orbit | Side: Pan | Wheel: Zoom</small>
     </div>
     
-    <div id="container">
-        <div id="view-persp" class="viewport" tabindex="0"><div class="label">PERSPECTIVE</div></div>
-        <div id="view-top" class="viewport" tabindex="1"><div class="label">TOP (Y+)</div></div>
-        <div id="view-front" class="viewport" tabindex="2"><div class="label">FRONT (Z+)</div></div>
-        <div id="view-left" class="viewport" tabindex="3"><div class="label">LEFT (X-)</div></div>
+    <div id="main-container">
+        <!-- Cột chính -->
+        <div id="main-view">
+            <div id="view-main" class="viewport" tabindex="0">
+                <div class="label" id="main-label">PERSPECTIVE</div>
+            </div>
+        </div>
+        
+        <!-- Cột phụ - 3 camera -->
+        <div id="side-views">
+            <div class="side-viewport">
+                <div id="view-top" class="viewport" tabindex="1">
+                    <button class="switch-btn" data-view="top" title="Switch to Main">
+                        <svg viewBox="0 0 24 24"><path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/></svg>
+                    </button>
+                    <div class="label">TOP (Y+)</div>
+                </div>
+            </div>
+            
+            <div class="side-viewport">
+                <div id="view-front" class="viewport" tabindex="2">
+                    <button class="switch-btn" data-view="front" title="Switch to Main">
+                        <svg viewBox="0 0 24 24"><path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/></svg>
+                    </button>
+                    <div class="label">FRONT (Z+)</div>
+                </div>
+            </div>
+            
+            <div class="side-viewport">
+                <div id="view-left" class="viewport" tabindex="3">
+                    <button class="switch-btn" data-view="left" title="Switch to Main">
+                        <svg viewBox="0 0 24 24"><path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/></svg>
+                    </button>
+                    <div class="label">LEFT (X-)</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script type="importmap">
