@@ -1,81 +1,122 @@
 import * as THREE from 'three';
 
-export default class CustomControls {
-    constructor(camera) {
+export class CustomControls {
+    constructor(container, camera, target) {
+        this.container = container;
         this.camera = camera;
-        this.camera.matrixAutoUpdate = false;
+        this.target = target ? target.clone() : new THREE.Vector3(0, 0, 0);
+        
+        this.config = {
+            rotateSpeed: 0.005,
+            panSpeed: 1.0,
+            zoomSpeed: 0.1
+        };
+
+        this.mouseState = { dragging: false, button: null, lastX: 0, lastY: 0 };
+        
+        // Khởi tạo userData.zoomLevel cho orthographic camera
+        if (!this.camera.isPerspectiveCamera) {
+            this.camera.userData.zoomLevel = 15;
+        }
+        
+        this.initEvents();
     }
 
-    getPosition() {
-        return new THREE.Vector3().setFromMatrixPosition(this.camera.matrix);
+    normalizeMatrix() {
+        this.camera.updateMatrixWorld(true);
+        const m = this.camera.matrixWorld;
+        const e = m.elements;
+        const x = new THREE.Vector3(e[0], e[1], e[2]).normalize();
+        const y = new THREE.Vector3(e[4], e[5], e[6]);
+        y.sub(x.clone().multiplyScalar(y.dot(x))).normalize();
+        
+        e[0] = x.x; e[1] = x.y; e[2] = x.z;
+        e[4] = y.x; e[5] = y.y; e[6] = y.z;
+        this.camera.matrix.copy(m);
+        this.camera.matrix.decompose(this.camera.position, this.camera.quaternion, this.camera.scale);
     }
 
-    Direction() {
-        const tempMatrix = new THREE.Matrix4();
-        tempMatrix.extractRotation(this.camera.matrix);
-        return new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+    rotateOrbit(dx, dy) {
+        const offset = this.camera.position.clone().sub(this.target);
+        const spherical = new THREE.Spherical().setFromVector3(offset);
+        
+        spherical.theta -= dx * this.config.rotateSpeed;
+        spherical.phi -= dy * this.config.rotateSpeed;
+        spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+        
+        offset.setFromSpherical(spherical);
+        this.camera.position.copy(this.target).add(offset);
+        this.camera.lookAt(this.target);
+        this.normalizeMatrix();
     }
 
-    setPosition(pos) {
-        this.camera.position.copy(pos);
-        this.update();
+    pan(dx, dy) {
+        const rect = this.container.getBoundingClientRect();
+        const worldX = (dx / rect.width) * this.camera.userData.zoomLevel * 2;
+        const worldY = (dy / rect.height) * this.camera.userData.zoomLevel * 2;
+
+        const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+
+        const move = right.multiplyScalar(-worldX).add(up.multiplyScalar(worldY));
+        this.camera.position.add(move);
+        this.target.add(move);
     }
 
-    setDirection(normal) {
-        const pos = this.getPosition();
-        const targetPoint = new THREE.Vector3().addVectors(pos, normal);
-        const m1 = new THREE.Matrix4();
-        m1.lookAt(pos, targetPoint, this.camera.up);
-        this.camera.quaternion.setFromRotationMatrix(m1);
-        this.update();
+    zoom(delta) {
+        if (this.camera.isPerspectiveCamera) {
+            const dir = this.camera.position.clone().sub(this.target).normalize();
+            this.camera.position.add(dir.multiplyScalar(delta * this.config.zoomSpeed * 10));
+        } else {
+            this.camera.userData.zoomLevel += delta * this.config.zoomSpeed * 5;
+            this.camera.userData.zoomLevel = Math.max(0.1, this.camera.userData.zoomLevel);
+            this.updateOrthoProjection();
+        }
     }
 
-    setQuaternion(quat) {
-        this.camera.quaternion.copy(quat);
-        this.update();
+    updateOrthoProjection() {
+        if (!this.camera.isPerspectiveCamera) {
+            const aspect = this.container.clientWidth / this.container.clientHeight;
+            const zoom = this.camera.userData.zoomLevel;
+            this.camera.left = -zoom * aspect;
+            this.camera.right = zoom * aspect;
+            this.camera.top = zoom;
+            this.camera.bottom = -zoom;
+            this.camera.updateProjectionMatrix();
+        }
     }
 
-    update() {
-        this.camera.updateMatrix();
-        this.camera.matrixWorld.copy(this.camera.matrix);
-    }
+    initEvents() {
+        this.container.addEventListener('mousedown', e => {
+            this.mouseState.dragging = true;
+            this.mouseState.button = e.button;
+            this.mouseState.lastX = e.clientX;
+            this.mouseState.lastY = e.clientY;
+        });
 
-    rotLocal(alpha, phi, theta) {
-        const euler = new THREE.Euler(alpha, phi, theta, 'XYZ');
-        const quat = new THREE.Quaternion().setFromEuler(euler);
-        this.camera.quaternion.multiply(quat);
-        this.update();
-    }
+        window.addEventListener('mousemove', e => {
+            if (!this.mouseState.dragging) return;
+            const dx = e.clientX - this.mouseState.lastX;
+            const dy = e.clientY - this.mouseState.lastY;
+            this.mouseState.lastX = e.clientX;
+            this.mouseState.lastY = e.clientY;
 
-    rotWorld(alpha, phi, theta, target) {
-        const pos = this.getPosition();
-        const offset = pos.clone().sub(target);
-        const euler = new THREE.Euler(alpha, phi, theta, 'YXZ');
-        const quat = new THREE.Quaternion().setFromEuler(euler);
+            if (this.camera.isPerspectiveCamera) {
+                this.rotateOrbit(dx, dy);
+            } else {
+                this.pan(dx, dy);
+            }
+        });
 
-        offset.applyQuaternion(quat);
-        this.camera.position.copy(target).add(offset);
+        window.addEventListener('mouseup', () => {
+            this.mouseState.dragging = false;
+        });
 
-        const m1 = new THREE.Matrix4();
-        m1.lookAt(this.camera.position, target, this.camera.up);
-        this.camera.quaternion.setFromRotationMatrix(m1);
+        this.container.addEventListener('wheel', e => {
+            e.preventDefault();
+            this.zoom(Math.sign(e.deltaY));
+        }, { passive: false });
 
-        this.update();
-    }
-
-    normalizeAxes() {
-        const m = this.camera.matrix;
-        let x = new THREE.Vector3().setFromMatrixColumn(m, 0);
-        let y = new THREE.Vector3().setFromMatrixColumn(m, 1);
-        let z = new THREE.Vector3().setFromMatrixColumn(m, 2);
-
-        z.normalize();
-        x.crossVectors(y, z).normalize();
-        y.crossVectors(z, x).normalize();
-
-        const newMatrix = new THREE.Matrix4().makeBasis(x, y, z);
-        this.camera.quaternion.setFromRotationMatrix(newMatrix);
-        this.camera.up.copy(y);
-        this.update();
+        this.container.addEventListener('contextmenu', e => e.preventDefault());
     }
 }
