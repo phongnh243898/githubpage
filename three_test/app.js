@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PCDLoader } from 'three/addons/loaders/PCDLoader.js';
-import CustomControls from './CustomControls.js';
+import { CustomControls } from './CustomControls.js';
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a0a);
@@ -11,108 +11,144 @@ let sharedTarget = new THREE.Vector3(0, 0, 0);
 let pcdObject = null;
 const frustumSize = 15;
 
-// --- Helper tạo View Orthographic ---
-function createOrthoView(id, pos, lookDir, upDir = new THREE.Vector3(0, 1, 0)) {
-    const container = document.getElementById(id);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.appendChild(renderer.domElement);
-
-    const aspect = container.clientWidth / container.clientHeight;
-    const cam = new THREE.OrthographicCamera(-frustumSize * aspect, frustumSize * aspect, frustumSize, -frustumSize, 0.1, 1000);
-    cam.position.copy(pos);
-    cam.up.copy(upDir);
-
-    const controls = new CustomControls(cam);
-    controls.setDirection(lookDir);
-
-    return { container, renderer, cam, controls };
-}
-
-// 1. Perspective View
-const pContainer = document.getElementById('view-persp');
-const pRenderer = new THREE.WebGLRenderer({ antialias: true });
-pRenderer.setSize(pContainer.clientWidth, pContainer.clientHeight);
-pContainer.appendChild(pRenderer.domElement);
-const pCam = new THREE.PerspectiveCamera(75, pContainer.clientWidth / pContainer.clientHeight, 0.1, 1000);
-pCam.position.set(10, 10, 10);
-const pControls = new CustomControls(pCam);
-pControls.setDirection(sharedTarget.clone().sub(pCam.position));
-
-// 2. Ortho Views
-const vTop = createOrthoView('view-top', new THREE.Vector3(0, 50, 0), new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, -1));
-const vFront = createOrthoView('view-front', new THREE.Vector3(0, 0, 50), new THREE.Vector3(0, 0, -1));
-const vLeft = createOrthoView('view-left', new THREE.Vector3(-50, 0, 0), new THREE.Vector3(1, 0, 0));
-
-const allViews = [
-    { name: 'persp', container: pContainer, renderer: pRenderer, cam: pCam, controls: pControls, isOrtho: false },
-    { name: 'top', ...vTop, isOrtho: true },
-    { name: 'front', ...vFront, isOrtho: true },
-    { name: 'left', ...vLeft, isOrtho: true }
-];
-
-function syncAll() {
-    // Đồng bộ vị trí các camera Ortho theo sharedTarget nhưng giữ khoảng cách xa (50)
-    vTop.cam.position.set(sharedTarget.x, 50, sharedTarget.z);
-    vFront.cam.position.set(sharedTarget.x, sharedTarget.y, 50);
-    vLeft.cam.position.set(-50, sharedTarget.y, sharedTarget.z);
-    
-    allViews.forEach(v => v.controls.update());
-}
-
-const setupEvents = (view) => {
-    const { container, controls, cam, isOrtho } = view;
-
-    container.addEventListener('mousemove', (e) => {
-        if (document.activeElement !== container) return;
-        const sens = 0.005;
-
-        if (e.buttons === 1) { // Left Click
-            if (!isOrtho) {
-                const distance = cam.position.distanceTo(sharedTarget);
-                if (e.shiftKey) controls.rotLocal(0, 0, -e.movementX * sens);
-                else controls.rotLocal(-e.movementY * sens, -e.movementX * sens, 0);
-                
-                const forward = controls.Direction();
-                cam.position.copy(sharedTarget.clone().sub(forward.multiplyScalar(distance)));
-                controls.normalizeAxes();
-            } else {
-                // Pan cho Ortho
-                const zoomFactor = (cam.top - cam.bottom) / (cam.zoom * container.clientHeight);
-                const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0);
-                const up = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 1);
-                const delta = right.multiplyScalar(-e.movementX * zoomFactor).add(up.multiplyScalar(e.movementY * zoomFactor));
-                sharedTarget.add(delta);
-                pCam.position.add(delta);
-            }
-            syncAll();
-        }
-
-        if (e.buttons === 2) { // Right Click: Pan chung
-            const moveSpeed = isOrtho ? 0.02 : 0.03;
-            const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0);
-            const up = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 1);
-            const delta = right.multiplyScalar(-e.movementX * moveSpeed).add(up.multiplyScalar(e.movementY * moveSpeed));
-            sharedTarget.add(delta);
-            pCam.position.add(delta);
-            syncAll();
-        }
-    });
-
-    container.addEventListener('wheel', (e) => {
-        if (document.activeElement !== container) return;
-        if (!isOrtho) {
-            cam.fov = THREE.MathUtils.clamp(cam.fov + e.deltaY * 0.05, 5, 120);
-        } else {
-            cam.zoom = THREE.MathUtils.clamp(cam.zoom - e.deltaY * 0.001, 0.1, 50);
-        }
-        cam.updateProjectionMatrix();
-    }, { passive: true });
-
-    container.addEventListener('contextmenu', e => e.preventDefault());
+// Tạo 4 camera
+const cameras = {
+    persp: null,
+    top: null,
+    front: null,
+    left: null
 };
 
-allViews.forEach(setupEvents);
+// Camera Perspective
+const mainContainer = document.getElementById('view-main');
+const mainRenderer = new THREE.WebGLRenderer({ antialias: true });
+mainRenderer.setSize(mainContainer.clientWidth, mainContainer.clientHeight);
+mainContainer.appendChild(mainRenderer.domElement);
+
+cameras.persp = new THREE.PerspectiveCamera(75, mainContainer.clientWidth / mainContainer.clientHeight, 0.1, 1000);
+cameras.persp.position.set(10, 10, 10);
+cameras.persp.lookAt(sharedTarget);
+
+const mainControls = new CustomControls(mainContainer, cameras.persp, sharedTarget);
+
+// Camera Orthographic - Top
+const topContainer = document.getElementById('view-top');
+const topRenderer = new THREE.WebGLRenderer({ antialias: true });
+topRenderer.setSize(topContainer.clientWidth, topContainer.clientHeight);
+topContainer.appendChild(topRenderer.domElement);
+
+const aspect = topContainer.clientWidth / topContainer.clientHeight;
+cameras.top = new THREE.OrthographicCamera(-frustumSize * aspect, frustumSize * aspect, frustumSize, -frustumSize, 0.1, 1000);
+cameras.top.position.set(0, 50, 0);
+cameras.top.up.set(0, 0, -1);
+cameras.top.lookAt(0, 0, 0);
+cameras.top.userData.zoomLevel = frustumSize;
+
+const topControls = new CustomControls(topContainer, cameras.top, sharedTarget);
+
+// Camera Orthographic - Front
+const frontContainer = document.getElementById('view-front');
+const frontRenderer = new THREE.WebGLRenderer({ antialias: true });
+frontRenderer.setSize(frontContainer.clientWidth, frontContainer.clientHeight);
+frontContainer.appendChild(frontRenderer.domElement);
+
+cameras.front = new THREE.OrthographicCamera(-frustumSize * aspect, frustumSize * aspect, frustumSize, -frustumSize, 0.1, 1000);
+cameras.front.position.set(0, 0, 50);
+cameras.front.lookAt(0, 0, 0);
+cameras.front.userData.zoomLevel = frustumSize;
+
+const frontControls = new CustomControls(frontContainer, cameras.front, sharedTarget);
+
+// Camera Orthographic - Left
+const leftContainer = document.getElementById('view-left');
+const leftRenderer = new THREE.WebGLRenderer({ antialias: true });
+leftRenderer.setSize(leftContainer.clientWidth, leftContainer.clientHeight);
+leftContainer.appendChild(leftRenderer.domElement);
+
+cameras.left = new THREE.OrthographicCamera(-frustumSize * aspect, frustumSize * aspect, frustumSize, -frustumSize, 0.1, 1000);
+cameras.left.position.set(-50, 0, 0);
+cameras.left.lookAt(0, 0, 0);
+cameras.left.userData.zoomLevel = frustumSize;
+
+const leftControls = new CustomControls(leftContainer, cameras.left, sharedTarget);
+
+// Lưu trữ thông tin các view
+const views = {
+    main: { container: mainContainer, renderer: mainRenderer, camera: cameras.persp, controls: mainControls, name: 'PERSPECTIVE' },
+    top: { container: topContainer, renderer: topRenderer, camera: cameras.top, controls: topControls, name: 'TOP (Y+)' },
+    front: { container: frontContainer, renderer: frontRenderer, camera: cameras.front, controls: frontControls, name: 'FRONT (Z+)' },
+    left: { container: leftContainer, renderer: leftRenderer, camera: cameras.left, controls: leftControls, name: 'LEFT (X-)' }
+};
+
+let currentMainView = 'persp';
+
+// Hàm chuyển đổi camera
+function switchToMain(viewName) {
+    if (viewName === currentMainView) return;
+    
+    // Lưu camera hiện tại
+    const oldMain = views.main;
+    const newMain = views[viewName];
+    
+    // Hoán đổi camera và renderer
+    const tempCamera = oldMain.camera;
+    const tempRenderer = oldMain.renderer;
+    const tempControls = oldMain.controls;
+    const tempName = oldMain.name;
+    
+    // Xóa renderer cũ
+    oldMain.container.innerHTML = '';
+    newMain.container.innerHTML = '';
+    
+    // Gán renderer mới
+    oldMain.container.appendChild(newMain.renderer.domElement);
+    newMain.container.appendChild(tempRenderer.domElement);
+    
+    // Cập nhật kích thước
+    newMain.renderer.setSize(newMain.container.clientWidth, newMain.container.clientHeight);
+    tempRenderer.setSize(oldMain.container.clientWidth, oldMain.container.clientHeight);
+    
+    // Hoán đổi thông tin
+    oldMain.camera = newMain.camera;
+    oldMain.renderer = newMain.renderer;
+    oldMain.controls = newMain.controls;
+    oldMain.name = newMain.name;
+    
+    newMain.camera = tempCamera;
+    newMain.renderer = tempRenderer;
+    newMain.controls = tempControls;
+    newMain.name = tempName;
+    
+    // Cập nhật controls container
+    oldMain.controls.container = oldMain.container;
+    newMain.controls.container = newMain.container;
+    
+    // Cập nhật label
+    document.getElementById('main-label').textContent = oldMain.name;
+    newMain.container.parentElement.querySelector('.label').textContent = newMain.name;
+    
+    // Cập nhật camera aspect
+    if (tempCamera.isPerspectiveCamera) {
+        tempCamera.aspect = newMain.container.clientWidth / newMain.container.clientHeight;
+    }
+    if (oldMain.camera.isPerspectiveCamera) {
+        oldMain.camera.aspect = oldMain.container.clientWidth / oldMain.container.clientHeight;
+    }
+    
+    tempCamera.updateProjectionMatrix();
+    oldMain.camera.updateProjectionMatrix();
+    
+    currentMainView = viewName;
+}
+
+// Gắn sự kiện cho các nút chuyển đổi
+document.querySelectorAll('.switch-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const viewName = btn.getAttribute('data-view');
+        switchToMain(viewName);
+    });
+});
 
 // Upload PCD
 document.getElementById('pcd-upload').addEventListener('change', (e) => {
@@ -124,30 +160,38 @@ document.getElementById('pcd-upload').addEventListener('change', (e) => {
         const points = loader.parse(event.target.result);
         if (pcdObject) scene.remove(pcdObject);
         pcdObject = points;
-        pcdObject.material.size = 0.05; // Chỉnh kích thước điểm cho dễ nhìn
+        pcdObject.material.size = 0.05;
         scene.add(pcdObject);
     };
     reader.readAsArrayBuffer(file);
 });
 
+// Animation loop
 function animate() {
     requestAnimationFrame(animate);
-    allViews.forEach(v => v.renderer.render(scene, v.cam));
+    Object.values(views).forEach(v => {
+        v.renderer.render(scene, v.camera);
+    });
 }
 animate();
 
+// Resize handler
 window.addEventListener('resize', () => {
-    allViews.forEach(v => {
+    Object.values(views).forEach(v => {
         const w = v.container.clientWidth;
         const h = v.container.clientHeight;
         v.renderer.setSize(w, h);
-        if (!v.isOrtho) {
-            v.cam.aspect = w / h;
+        
+        if (v.camera.isPerspectiveCamera) {
+            v.camera.aspect = w / h;
         } else {
             const aspect = w / h;
-            v.cam.left = -frustumSize * aspect;
-            v.cam.right = frustumSize * aspect;
+            const zoom = v.camera.userData.zoomLevel;
+            v.camera.left = -zoom * aspect;
+            v.camera.right = zoom * aspect;
+            v.camera.top = zoom;
+            v.camera.bottom = -zoom;
         }
-        v.cam.updateProjectionMatrix();
+        v.camera.updateProjectionMatrix();
     });
 });
